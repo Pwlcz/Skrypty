@@ -1,6 +1,17 @@
 #!/bin/bash
 # TODO: add option to set default variables
 # TODO: compleat 
+set -euo pipefail
+
+CONF_FILE="$(dirname "$(which "$0")")/brudnopis.conf"
+if [[ -f "${CONF_FILE}" ]]; then
+  # shellcheck source=/home/pwlcz/Projekty/Skrypty/brudnopis/brudnopis.conf
+  source "${CONF_FILE}"
+fi
+
+function restore_defaults() {
+  cat > "${CONF_FILE}" << 'EOF'
+# Default configuration for brudnopis
 NOTE_FILE="${NOTE_FILE:=brudnopis.txt}"
 
 readonly EDITOR="${EDITOR:=vim}"
@@ -14,7 +25,8 @@ repo_dir=$(git rev-parse --show-toplevel 2>/dev/null || echo '')
 
 flag_force_local=false
 flag_use_global=false
-
+EOF
+}
 
 function help() {
   # TODO: update
@@ -39,13 +51,13 @@ EOF
 }
 
 function find_notes() {
-  local dir="${1:=${find_dir}}"
+  local dir="${1:-${find_dir}}"
   find "${dir}" -type f -name "${NOTE_FILE}" -exec ls -lh {} +  
 }
 
 function cat_notes() {
   # TODO: sort by dir / timestamp / none
-  local dir="${1:=${find_dir}}"
+  local dir="${1:-${find_dir}}"
   find "${dir}" -type f -name "${NOTE_FILE}" -exec cat {} +
 }
 
@@ -137,7 +149,7 @@ function quicknote() {
 
 ############## ARGS PARSING ##############
 
-if ! PARSED_ARGS=$(getopt --name brudnopis --options hrlgf --longoptions help,repo,local,global,find:: -- "$@"); then
+if ! PARSED_ARGS=$(getopt --name brudnopis --options hrlgf --longoptions help,repo,local,global,find::,default -- "$@"); then
   help
   exit 1
 fi
@@ -167,10 +179,16 @@ while true; do
       exit 0
       ;;
     --find)
+      # TODO: change to mandatory arg
       echo "arg 1: $1 , arg 2: $2"
-      find_dir="${2:=${find_dir}}"
+      find_dir="${2:-${find_dir}}"
       find_notes
-      shift 2
+      exit 0
+      ;;
+    --default)
+      restore_defaults
+      echo "Restored default configuration in ${CONF_FILE}"
+      exit 0
       ;;
     --)
       shift
