@@ -1,20 +1,215 @@
 #!/bin/bash
+# TODO: add option to set default variables
+# TODO: compleat 
+NOTE_FILE="${NOTE_FILE:=brudnopis.txt}"
 
-HOME_BRUDNOPIS=false
-while [[ $# -gt 0 ]]; do
-  case $1 in 
-    -g|--global)
-      HOME_BRUDNOPIS=true
+readonly EDITOR="${EDITOR:=vim}"
+readonly EDITOR_ARGS="${EDITOR_ARGS:=+}"
+readonly GENERAL_NOTE_FILE="${GENERAL_NOTE_FILE:=${HOME}/Dokumenty/brudnopis_general.txt}"
+readonly DATE_FORMAT="+%Y.%m.%d %A %R:%S"
+
+note_dir="${PWD}"
+find_dir="${PWD}"
+repo_dir=$(git rev-parse --show-toplevel 2>/dev/null || echo '')
+
+flag_force_local=false
+flag_use_global=false
+
+
+function help() {
+  # TODO: update
+  cat << EOF
+Open txt file for temp notes. To use preferred editor use "export EDITOR=[your editor]" or change the script file.
+
+Usage: brudnopis [options] [quick note text]
+
+Options:
+  -h | --help               Display this message.
+  -g | --global             Open general note in ${GENERAL_NOTE_FILE}
+  -l | --local              Force opening note in current dir
+  -r | --repo [options]     Config notes in git repo
+    [no-]ignore
+    merge=[dir | time]
+    split=[dir | time]
+  -s | --set[-default]      Change program variable
+
+EOF
+  echo "${note_dir}"
+  echo "${GENERAL_NOTE_FILE}"
+}
+
+function find_notes() {
+  local dir="${1:=${find_dir}}"
+  find "${dir}" -type f -name "${NOTE_FILE}" -exec ls -lh {} +  
+}
+
+function cat_notes() {
+  # TODO: sort by dir / timestamp / none
+  local dir="${1:=${find_dir}}"
+  find "${dir}" -type f -name "${NOTE_FILE}" -exec cat {} +
+}
+
+function _last_line_empty() {
+  local last_line=""
+  last_line=$(tail -n 1 "${NOTE_FILE}")
+  [[ -z "${last_line}" ]] && return 0 || return 1
+}
+
+function _gitignore_check() {
+  local gitignore_file="${repo_dir}/.gitignore"
+  if grep -q "${NOTE_FILE}" "${gitignore_file}"; then
+    return 0
+  else
+    return 1
+  fi
+}
+
+#TODO
+function repo_config() {
+  if [[ "${repo_dir}" != "" ]]; then
+    printf "Configuring notes in git repo: %s\n" "${repo_dir}"
+
+    echo "Checking .gitignore for ${NOTE_FILE}..."
+    if ! _gitignore_check; then
+      read -rp "Add ${NOTE_FILE} to .gitignore? (y/n): " gitignore_choice
+      if [[ "${gitignore_choice}" == [yY] ]]; then
+        echo "${NOTE_FILE}" >> "${repo_dir}/.gitignore"
+        echo "Added ${NOTE_FILE} to .gitignore"
+      else
+        echo "Skipping adding to .gitignore."
+      fi
+    else
+      echo "${NOTE_FILE} is already in .gitignore"
+    fi
+
+    echo "Notes in repo:"
+    files_ls=$(find_notes "${repo_dir}")
+    echo "${files_ls}"
+    files_count=$(echo "${files_ls}" | wc -l)
+
+    if (( files_count > 1 )); then
+      echo "There are ${files_count} notes in the repo."
+      read -rp "Do you want to merge them into one note? (y/n): " merge_choice
+      if [[ "${merge_choice}" == [yY] ]]; then
+        echo "Merging notes..."
+        cat_notes "${repo_dir}" >> "${repo_dir}/${NOTE_FILE}"
+        echo "Merged notes into ${repo_dir}/${NOTE_FILE}"
+        echo "Removing old notes..."
+        find "${repo_dir}" -type f -name "${NOTE_FILE}" ! -path "${repo_dir}/${NOTE_FILE}" -exec rm {} +
+        echo "Old notes removed."
+      else
+        echo "Merge cancelled."
+      fi
+    fi
+
+
+  else
+    echo "Not in a git repo."
+  fi
+}
+
+function print_vars() {
+  echo "NOTE_FILE: ${NOTE_FILE}"
+  echo "GENERAL_NOTE_FILE: ${GENERAL_NOTE_FILE}"
+  echo "EDITOR: ${EDITOR}"
+  echo "EDITOR_ARGS: ${EDITOR_ARGS}"
+  echo "DATE_FORMAT: ${DATE_FORMAT}"
+  echo "note_dir: ${note_dir}"
+  echo "repo_dir: ${repo_dir}"
+}
+
+# function set_var() {
+
+function timestamp() {
+  if ! _last_line_empty; then
+    echo ''
+  fi
+  date "${DATE_FORMAT}"
+  echo ''
+} >> "${NOTE_FILE}"
+
+function quicknote() {
+  text="$*"
+  if [[ -n "${text}" ]]; then
+    echo "${text}" >> "${NOTE_FILE}"
+  fi
+}
+
+############## ARGS PARSING ##############
+
+if ! PARSED_ARGS=$(getopt --name brudnopis --options hrlgf --longoptions help,repo,local,global,find:: -- "$@"); then
+  help
+  exit 1
+fi
+eval set -- "$PARSED_ARGS"
+echo "Parsed args: $PARSED_ARGS"
+ 
+while true; do
+  case "$1" in 
+    -h | --help)
+      help
+      exit 0
+      ;;
+    -g | --global)
+      flag_use_global=true
       shift
       ;;
+    -l | --local)
+      flag_force_local=true
+      shift
+      ;;
+    -r | --repo)
+      repo_config
+      exit 0
+      ;;
+    -f)
+      find_notes
+      exit 0
+      ;;
+    --find)
+      echo "arg 1: $1 , arg 2: $2"
+      find_dir="${2:=${find_dir}}"
+      find_notes
+      shift 2
+      ;;
+    --)
+      shift
+      break
+      ;;
     *)
+      echo "Unrecognized option: $1"
       shift
       ;;
   esac
 done
 
-if [[ "${HOME_BRUDNOPIS}" == "true" ]] || [[ "$PWD" == "$HOME" ]];  then
-  vim ~/Dokumenty/brudnopis_general.txt
-else
-  vim brudnopis.txt
+############## MAIN ##############
+
+if [[ "${flag_use_global}" == true && "${flag_force_local}" == true ]]; then
+  echo "Cannot use both --global and --local flags."
+  exit 1
 fi
+
+if [[ "${flag_force_local}" == true ]];  then                                  #force note in PWD
+  NOTE_FILE="${PWD}/${NOTE_FILE}"
+
+elif [[ "${note_dir}" == "${HOME}" || "${flag_use_global}" == true ]]; then    #general note  
+  NOTE_FILE="${GENERAL_NOTE_FILE}"
+
+elif [[ "${repo_dir}" != "" ]]; then                                           #note in git repo
+  NOTE_FILE="${repo_dir}/${NOTE_FILE}"
+
+else                                                                           #note in PWD
+  NOTE_FILE="${note_dir}/${NOTE_FILE}"
+
+fi
+
+if [[ "$*" != "" ]]; then
+  echo "$*"
+  timestamp
+  quicknote "$*"
+  exit 0
+fi
+
+timestamp
+"${EDITOR}" "${EDITOR_ARGS}" "${NOTE_FILE}"
