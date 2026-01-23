@@ -1,0 +1,300 @@
+#!/bin/bash
+#  brudnopis - simple note taking script
+#  Author: Pwlcz
+#  It started as alias brudnopis="vim ~/brudnopis.txt", but evolved into this monstorosity.
+#  Config file is stored in ${HOME}/configs/brudnopis.conf
+#  Completion script for zsh is generated in ${HOME}/.zsh/completions/_brudnopis
+
+set -euo pipefail
+
+CONF_FILE="${HOME}/configs/brudnopis.conf"
+if [[ -f "${CONF_FILE}" ]]; then
+  # shellcheck source=${HOME}/configs/brudnopis.conf
+  source "${CONF_FILE}"
+fi
+
+function restore_defaults() {
+  mkdir -p "${HOME}/configs"
+  cat > "${CONF_FILE}" << 'EOF'
+# Default configuration for brudnopis
+NOTE_FILE="${NOTE_FILE:=brudnopis.txt}"
+
+readonly EDITOR="${EDITOR:=vim}"
+readonly EDITOR_ARGS="${EDITOR_ARGS:=+}"
+readonly GENERAL_NOTE_FILE="${GENERAL_NOTE_FILE:=${HOME}/Dokumenty/brudnopis_general.txt}"
+readonly DATE_FORMAT="+%Y-%m-%d %A %R:%S"
+
+note_dir="${PWD}"
+repo_dir=$(git rev-parse --show-toplevel 2>/dev/null || echo '')
+
+flag_force_local=false
+flag_use_global=false
+EOF
+  # shellcheck source=${HOME}/configs/brudnopis.conf
+  source "${CONF_FILE}"
+}
+
+function help() {
+  cat << EOF
+Open txt file for temp notes. To use preferred editor edit the script config file.
+
+Usage: brudnopis [options] [quick note text]
+Any non-option arguments are treated as quick note text to be appended to the note file.
+
+Options:
+  -h, --help                Display this message.
+  -g, --global              Open general note in ${GENERAL_NOTE_FILE}
+  -l, --local               Force opening note in current dir
+  -r, --repo                Config notes in git repo
+  -f, --find                Find all notes in current dir and subdirs
+  --compleat                Generate zsh completion script
+  --print-variables         Print current program variables
+  --edit-variables          Edit program variables in ${CONF_FILE}
+  --default                 Restore default configuration in ${CONF_FILE}
+  -s, --search [date,mode]  Search notes by date. Mode: exact, newer, older
+                            Can interpret dates like 2024-06-15, "June 15, 2024" today, yesterday, "3 days ago"
+                            If mode is omitted, defaults to exact.
+                            If date contains spaces, enclose it in quotes.
+                            Example: brudnopis --search 2024-06-15,exact
+EOF
+}
+
+function compleat() {
+  local comp_dir="${HOME}/.zsh/completions"
+  mkdir -p "$comp_dir"
+  cat > "${comp_dir}/_brudnopis" << 'EOF'
+#compdef brudnopis
+
+_brudnopis() {
+  local -a args
+  args=(
+    '(-h --help)'{-h,--help}'[Display help message]'
+    '(-g --global)'{-g,--global}'[Open general note]'
+    '(-l --local)'{-l,--local}'[Force opening note in current dir]'
+    '(-r --repo)'{-r,--repo}'[Config notes in git repo]'
+    '(-f --find)'{-f,--find}'[Find all notes recursively]'
+    '(-s --search)'{-s,--search}'[Search notes by date]:date string'
+    '--compleat[Generate completion script]'
+    '--print-variables[Print debug variables]'
+    '--edit-variables[Edit config file]'
+    '--default[Restore defaults]'
+    '*:quick note:_default'
+  )
+  _arguments "${args[@]}"
+}
+_brudnopis "$@"
+EOF
+  echo "Completion script written to ${comp_dir}/_brudnopis"
+  echo "Please restart your shell or run: source ~/.zshrc"
+}
+# remember to add this to your .zshrc to enable completions:
+# fpath=(~/.zsh/completions $fpath)
+# autoload -Uz compinit; compinit
+
+function find_notes() {
+  local dir="${1:-${note_dir}}"
+  find "${dir}" -type f -name "${NOTE_FILE}" -exec ls -lh {} +  
+}
+
+function search_date_in_brudnopis() {
+    local input_string="$1"
+    local file="${NOTE_FILE}"
+    local IFS=','
+    read -ra array <<< "$input_string"
+
+    local raw_target="${array[0]}"
+    local mode="${array[1]:="exact"}"        # "exact", "newer", "older"
+
+    if ! target=$(date -d "${raw_target//./-}" +%Y-%m-%d 2>/dev/null); then
+        echo "Error: Could not understand date '$raw_target'"
+        return 1
+    fi
+    echo "Searching for date: $raw_target (parsed as $target) with mode: $mode"
+    awk -v target="$target" -v mode="$mode" '
+    /^[0-9]{4}\-[0-9]{2}\-[0-9]{2}/ {
+        current_date = $1
+
+        should_print = 1
+        if (mode == "exact") {
+            should_print = (current_date == target)
+        }
+        else if (mode == "newer") {
+            should_print = (current_date >= target)
+        }
+        else if (mode == "older") {
+            should_print = (current_date < target)
+        }
+    }
+
+    should_print { print }
+    ' "$file"
+}
+
+function repo_config() {
+  if [[ "${repo_dir}" != "" ]]; then
+    printf "Configuring notes in git repo: %s\n" "${repo_dir}"
+
+    echo "Checking .gitignore for ${NOTE_FILE}..."
+    local gitignore_file="${repo_dir}/.gitignore"
+
+    if [[ ! -f "${gitignore_file}" ]] || ! grep -q "${NOTE_FILE}" "${gitignore_file}"; then
+      read -rp "Add ${NOTE_FILE} to .gitignore? (y/n): " gitignore_choice
+      if [[ "${gitignore_choice}" == [yY] ]]; then
+        echo "${NOTE_FILE}" >> "${repo_dir}/.gitignore"
+        echo "Added ${NOTE_FILE} to .gitignore"
+      else
+        echo "Skipping adding to .gitignore."
+      fi
+    else
+      echo "${NOTE_FILE} is already in .gitignore"
+    fi
+
+    echo "Notes in repo:"
+    files_ls=$(find_notes "${repo_dir}")
+    echo "${files_ls}"
+    files_count=$(echo "${files_ls}" | wc -l)
+
+    if (( files_count > 1 )); then
+      echo "There are ${files_count} notes in the repo."
+      read -rp "Do you want to merge them into one note? (y/n): " merge_choice
+      if [[ "${merge_choice}" == [yY] ]]; then
+        echo "Merging notes..."
+        find "${repo_dir}" -type f -name "${NOTE_FILE}" -exec cat {} + >> "${repo_dir}/${NOTE_FILE}"
+        echo "Merged notes into ${repo_dir}/${NOTE_FILE}"
+        echo "Removing old notes..."
+        find "${repo_dir}" -type f -name "${NOTE_FILE}" ! -path "${repo_dir}/${NOTE_FILE}" -exec rm {} +
+        echo "Old notes removed."
+      else
+        echo "Merge cancelled."
+      fi
+    fi
+
+  else
+    echo "Not in a git repo."
+  fi
+}
+
+function print_vars() {
+  echo "Variables are stored in ${CONF_FILE}"
+  echo "NOTE_FILE: ${NOTE_FILE}"
+  echo "GENERAL_NOTE_FILE: ${GENERAL_NOTE_FILE}"
+  echo "EDITOR: ${EDITOR}"
+  echo "EDITOR_ARGS: ${EDITOR_ARGS}"
+  echo "DATE_FORMAT: ${DATE_FORMAT}"
+  echo "note_dir: ${note_dir}"
+  echo "repo_dir: ${repo_dir}"
+  echo "flag_force_local: ${flag_force_local}"
+  echo "flag_use_global: ${flag_use_global}"
+}
+
+function timestamp() {
+  local last_line=''
+  last_line=$(tail -n 1 "${NOTE_FILE}")
+  {
+    if [[ -n "${last_line}" ]]; then
+      echo ''
+    fi
+    date "${DATE_FORMAT}"
+    echo ''
+  } >> "${NOTE_FILE}"
+}
+
+function quicknote() {
+  text="$*"
+  if [[ -n "${text}" ]]; then
+    echo "${text}" >> "${NOTE_FILE}"
+  fi
+}
+
+function main() {
+  if ! PARSED_ARGS=$(getopt --name brudnopis --options hrlgfs: \
+                    --longoptions help,repo,local,global,find,default,search:,edit-variables,print-variables,compleat -- "$@"); then
+    help
+    exit 1
+  fi
+  eval set -- "$PARSED_ARGS"
+  
+  while true; do
+    case "$1" in 
+      -h | --help)
+        help
+        exit 0
+        ;;
+      -g | --global)
+        flag_use_global=true
+        shift
+        ;;
+      -l | --local)
+        flag_force_local=true
+        shift
+        ;;
+      -r | --repo)
+        repo_config
+        exit 0
+        ;;
+      -f | --find)
+        find_notes
+        exit 0
+        ;;
+      --default)
+        restore_defaults
+        print_vars
+        exit 0
+        ;;
+      -s | --search)
+        search_date_in_brudnopis "$2"
+        exit 0
+        ;;
+      --print-variables)
+        print_vars
+        exit 0
+        ;;
+      --edit-variables)
+        "${EDITOR}" "${EDITOR_ARGS}" "${CONF_FILE}"
+        exit 0
+        ;;
+      --compleat)
+        compleat
+        exit 0
+        ;;
+      --)
+        shift
+        break
+        ;;
+      *)
+        echo "Unrecognized option: $1"
+        shift
+        ;;
+    esac
+  done
+
+  if [[ "${flag_use_global}" == true && "${flag_force_local}" == true ]]; then
+    echo "Cannot use both --global and --local flags."
+    exit 1
+  fi
+
+  if [[ "${flag_force_local}" == true ]];  then                                  #force note in PWD
+    NOTE_FILE="${PWD}/${NOTE_FILE}"
+
+  elif [[ "${note_dir}" == "${HOME}" || "${flag_use_global}" == true ]]; then    #general note  
+    NOTE_FILE="${GENERAL_NOTE_FILE}"
+
+  elif [[ "${repo_dir}" != "" ]]; then                                           #note in git repo
+    NOTE_FILE="${repo_dir}/${NOTE_FILE}"
+
+  else                                                                           #note in PWD
+    NOTE_FILE="${note_dir}/${NOTE_FILE}"
+
+  fi
+
+  if [[ "$*" != "" ]]; then
+    timestamp
+    quicknote "$*"
+    exit 0
+  fi
+
+  timestamp
+  "${EDITOR}" "${EDITOR_ARGS}" "${NOTE_FILE}"
+}
+
+main "$@"
