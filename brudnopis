@@ -5,6 +5,7 @@
 #  Config file is stored in ${HOME}/.config/brudnopis.conf
 #  Completion script for zsh is generated in ${HOME}/.zsh/completions/_brudnopis
 set -euo pipefail
+search_args=''
 
 CONF_FILE="${HOME}/.config/brudnopis.conf"
 if [[ -f "${CONF_FILE}" ]]; then
@@ -29,8 +30,6 @@ repo_dir=$(git rev-parse --show-toplevel 2>/dev/null || echo '')
 flag_force_local=false
 flag_use_global=false
 EOF
-  # shellcheck source=${HOME}/.config/brudnopis.conf
-  source "${CONF_FILE}"
 }
 
 function help() {
@@ -140,7 +139,7 @@ function search_date_in_brudnopis() {
 }
 
 function repo_config() {
-  if [[ "${repo_dir}" != "" ]]; then
+  if [[ -n "${repo_dir}" ]]; then
     printf "Configuring notes in git repo: %s\n" "${repo_dir}"
 
     echo "Checking .gitignore for ${NOTE_FILE}..."
@@ -185,18 +184,12 @@ function repo_config() {
 
 function print_vars() {
   echo "Variables are stored in ${CONF_FILE}"
-  echo "NOTE_FILE: ${NOTE_FILE}"
-  echo "GENERAL_NOTE_FILE: ${GENERAL_NOTE_FILE}"
-  echo "EDITOR: ${EDITOR}"
-  echo "EDITOR_ARGS: ${EDITOR_ARGS}"
-  echo "DATE_FORMAT: ${DATE_FORMAT}"
-  echo "note_dir: ${note_dir}"
-  echo "repo_dir: ${repo_dir}"
-  echo "flag_force_local: ${flag_force_local}"
-  echo "flag_use_global: ${flag_use_global}"
+  cat "${CONF_FILE}"
 }
 
 function timestamp() {
+  [[ ! -f "${NOTE_FILE}" ]] && touch "${NOTE_FILE}"
+
   local last_line=''
   last_line=$(tail -n 1 "${NOTE_FILE}")
   {
@@ -216,10 +209,11 @@ function quicknote() {
 }
 
 function main() {
-  if [[ ! -f ${CONF_FILE} ]]; then
-    read -rp "Configuration file not found. Create default config at ${CONF_FILE}? (y/n): " create_conf_choice
-    if [[ "${create_conf_choice}" == [yY] ]]; then
+  if [[ "$*" != "--default" && ! -f ${CONF_FILE} ]]; then
+    read -rp "Configuration file not found. Create default config at ${CONF_FILE}? [Y/n]: " create_conf_choice
+    if [[ "${create_conf_choice}" == [yY] || -z "${create_conf_choice}" ]]; then
       restore_defaults
+      source "${CONF_FILE}"
     else
       echo "Cannot proceed without configuration file. Exiting."
       exit 1
@@ -298,7 +292,7 @@ function main() {
   elif [[ "${note_dir}" == "${HOME}" || "${flag_use_global}" == true ]]; then    #general note  
     NOTE_FILE="${GENERAL_NOTE_FILE}"
 
-  elif [[ "${repo_dir}" != "" ]]; then                                           #note in git repo
+  elif [[ -n "${repo_dir}" ]]; then                                              #note in git repo
     NOTE_FILE="${repo_dir}/${NOTE_FILE}"
 
   else                                                                           #note in PWD
@@ -306,19 +300,27 @@ function main() {
 
   fi
 
-  if [[ "${search_args}" != "" ]]; then
+  if [[ -n "${search_args}" ]]; then
     search_date_in_brudnopis "${search_args}"
     exit 0
   fi
 
-  if [[ "$*" != "" ]]; then
+  if [[ -n "$*" ]]; then
     timestamp
     quicknote "$*"
     exit 0
   fi
 
   timestamp
+  md5hash=$(md5sum "${NOTE_FILE}" | awk '{print $1}')
+  
   "${EDITOR}" "${EDITOR_ARGS}" "${NOTE_FILE}"
+  
+  new_md5hash=$(md5sum "${NOTE_FILE}" | awk '{print $1}')
+  if [[ "${md5hash}" == "${new_md5hash}" ]]; then
+    head -n -2 "${NOTE_FILE}" > "${NOTE_FILE}.tmp" && mv "${NOTE_FILE}.tmp" "${NOTE_FILE}"
+    echo "${NOTE_FILE} unchanged."
+  fi
 }
 
 main "$@"
