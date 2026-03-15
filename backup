@@ -1,0 +1,79 @@
+#!/bin/bash
+# Essencial files backup script using BorgBackup
+# TODO store key in veracrypt container
+
+# ==========================================
+# CONFIGURATION
+# ==========================================
+
+REPOSITORY="${HOME}/borg_backup"
+# export BORG_PASSPHRASE="secret_password"
+ARCHIVE_NAME="{hostname}@{now:%Y-%m-%d}"
+
+# ==========================================
+# SCRIPT LOGIC
+# ==========================================
+
+if [ ! -d "$REPOSITORY" ]; then
+    echo "Repository not found. Initializing..."
+    borg init --encryption=repokey "$REPOSITORY"
+fi
+
+echo "Starting Borg Backup..."
+
+borg create \
+    --stats \
+    --progress \
+    --compression zstd,3 \
+    --exclude "$HOME/.cache" \
+    --exclude "$HOME/.docker" \
+    --exclude "$HOME/.steam" \
+    --exclude "$HOME/borg_backup" \
+    "$REPOSITORY::$ARCHIVE_NAME" \
+    "$HOME"
+
+echo "Backup finished!"
+
+# ==========================================
+# AUTO PRUNE
+# ==========================================
+# - 1 backup for the last 7 days
+# - 1 backup for the last 4 weeks
+# - 1 backup for the last 6 months
+
+echo "Pruning old backups..."
+borg prune \
+    --list \
+    --keep-daily=7 \
+    --keep-weekly=4 \
+    --keep-monthly=6 \
+    "$REPOSITORY"
+
+echo "Pruning finished!"
+
+# ==========================================
+# SYNC TO EXTERNAL DRIVES
+# ==========================================
+
+shopt -s nullglob
+POSSIBLE_DRIVES=(/media/$USER/Pwlcz_*/)
+shopt -u nullglob
+
+if [ ${#POSSIBLE_DRIVES[@]} -eq 0 ]; then
+    echo "No external drives matching 'Pwlcz_*' are currently mounted."
+    exit 0
+fi
+
+echo "Found ${#POSSIBLE_DRIVES[@]} drive(s). Starting parallel sync..."
+
+for dest in "${POSSIBLE_DRIVES[@]}"; do
+    if [ -d "$dest" ]; then
+        echo " -> Starting background sync to: $dest"
+        rsync -a --delete "$REPOSITORY/" "${dest}borg-repo-copy/" &
+    fi
+done
+
+echo "Waiting for all transfers to complete..."
+wait
+
+echo "All backup drives have been successfully synced!"
