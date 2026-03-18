@@ -1,13 +1,14 @@
 #!/bin/bash
 # Essencial files backup script using BorgBackup
-# TODO store key in veracrypt container
 
 # ==========================================
 # CONFIGURATION
 # ==========================================
 
 REPOSITORY="${HOME}/borg_backup"
-# export BORG_PASSPHRASE="secret_password"
+if [[ -z ${BORG_PASSCOMMAND+null} ]]; then
+    export BORG_PASSPHRASE="${BORG_PASSPHRASE:-''}"
+fi
 ARCHIVE_NAME="{hostname}@{now:%Y-%m-%d}"
 
 # ==========================================
@@ -18,8 +19,16 @@ if [ ! -d "$REPOSITORY" ]; then
     echo "Repository not found. Initializing..."
     borg init --encryption=repokey "$REPOSITORY"
 fi
-
+null
 echo "Starting Borg Backup..."
+if [[ -z ${BORG_PASSCOMMAND+null} ]]; then
+    if [[ -n "$BORG_PASSPHRASE" ]]; then
+        echo "Using provided BORG_PASSPHRASE."
+    else
+        read -p "BORG_PASSPHRASE: " -s BORG_PASSPHRASE
+        export BORG_PASSPHRASE
+    fi
+fi
 
 borg create \
     --stats \
@@ -37,9 +46,6 @@ echo "Backup finished!"
 # ==========================================
 # AUTO PRUNE
 # ==========================================
-# - 1 backup for the last 7 days
-# - 1 backup for the last 4 weeks
-# - 1 backup for the last 6 months
 
 echo "Pruning old backups..."
 borg prune \
@@ -55,25 +61,4 @@ echo "Pruning finished!"
 # SYNC TO EXTERNAL DRIVES
 # ==========================================
 
-shopt -s nullglob
-POSSIBLE_DRIVES=(/media/$USER/Pwlcz_*/)
-shopt -u nullglob
-
-if [ ${#POSSIBLE_DRIVES[@]} -eq 0 ]; then
-    echo "No external drives matching 'Pwlcz_*' are currently mounted."
-    exit 0
-fi
-
-echo "Found ${#POSSIBLE_DRIVES[@]} drive(s). Starting parallel sync..."
-
-for dest in "${POSSIBLE_DRIVES[@]}"; do
-    if [ -d "$dest" ]; then
-        echo " -> Starting background sync to: $dest"
-        rsync -a --delete "$REPOSITORY/" "${dest}borg-repo-copy/" &
-    fi
-done
-
-echo "Waiting for all transfers to complete..."
-wait
-
-echo "All backup drives have been successfully synced!"
+usb-backup.sh

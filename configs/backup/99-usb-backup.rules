@@ -1,0 +1,1 @@
+ACTION=="add", SUBSYSTEM=="block", ENV{ID_FS_LABEL}=="Pwlcz_*", RUN+="/usr/bin/systemctl start usb-backup@%E{ID_FS_LABEL}.service"
