@@ -1,8 +1,0 @@
-[Unit]
-Description=Weekly Borg Backup
-
-[Service]
-Type=exec
-ExecStartPre=/usr/bin/notify-send "Borg Backup" "Starting weekly backup..." --icon=drive-harddisk --urgency=normal
-ExecStart=/home/pwlcz/Projekty/Skrypty/backup
-ExecStartPost=/usr/bin/notify-send "Borg Backup" "Weekly backup finished successfully!" --icon=drive-harddisk --urgency=normal

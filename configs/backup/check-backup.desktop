@@ -1,7 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=Backup Overdue Checker
-Exec=/home/pwlcz/.local/bin/check-backup-overdue.sh
-Hidden=false
-NoDisplay=false
-X-GNOME-Autostart-enabled=true
