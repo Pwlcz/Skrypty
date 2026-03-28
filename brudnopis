@@ -5,6 +5,9 @@
 #  Config file is stored in ${HOME}/.config/brudnopis.conf
 #  Completion script for zsh is generated in ${HOME}/.zsh/completions/_brudnopis
 set -euo pipefail
+
+VERSION='0.1.0'
+
 search_args=''
 
 CONF_FILE="${HOME}/.config/brudnopis.conf"
@@ -41,6 +44,7 @@ Any non-option arguments are treated as quick note text to be appended to the no
 
 Options:
   -h, --help                Display this message.
+  -v, --version             Show script version.
   -g, --global              Open general note in ${GENERAL_NOTE_FILE:-==CONFIG FILE MISSING==}
   -l, --local               Force opening note in current dir
   -r, --repo                Config notes in git repo
@@ -59,7 +63,7 @@ EOF
 
 function compleat() {
   local comp_dir="${HOME}/.zsh/completions"
-  mkdir -p "$comp_dir"
+  mkdir -p "${comp_dir}"
   cat > "${comp_dir}/_brudnopis" << 'EOF'
 #compdef brudnopis
 
@@ -67,6 +71,7 @@ _brudnopis() {
   local -a args
   args=(
     '(-h --help)'{-h,--help}'[Display help message]'
+    '(-v --version)'{-v,--version}'[Show script version]'
     '(-g --global)'{-g,--global}'[Open general note]'
     '(-l --local)'{-l,--local}'[Force opening note in current dir]'
     '(-r --repo)'{-r,--repo}'[Config notes in git repo]'
@@ -83,18 +88,18 @@ _brudnopis() {
 _brudnopis "$@"
 EOF
   local zshrc="${HOME}/.zshrc"
-  touch "${zshrc}"
-
-  if ! grep -Fq 'fpath=(~/.zsh/completions $fpath)' "${zshrc}"; then
-    echo 'fpath=(~/.zsh/completions $fpath)' >> "${zshrc}"
+  # shellcheck disable=SC2016
+  if ! grep -Eq 'fpath=\(.*\~/\.zsh/completions.*\$fpath\)' "${zshrc}"; then
+    echo "Adding completions directory to fpath in ${zshrc}..."
+    # Prepend the fpath line to the TOP of ~/.zshrc
+    sed -i.bak '1s;^;fpath=(~/.zsh/completions $fpath)\n;' "${zshrc}"
   fi
 
-  if grep -Eq '^\s*(autoload -Uz compinit(; *compinit)?|compinit)\s*$' "${zshrc}"; then
-    sed -i.bak -E '/^\s*(autoload -Uz compinit(; *compinit)?|compinit)\s*$/d' "${zshrc}" || true
+  if ! grep -Eq '\bcompinit\b' "${zshrc}"; then
+    echo "No compinit found in ${zshrc}. Adding it now..."
+    echo 'autoload -Uz compinit && compinit' >> "${zshrc}"
+    echo "Updated ${zshrc} to load completions. Old file backed up as ${zshrc}.bak"
   fi
-  echo 'autoload -Uz compinit; compinit' >> "${zshrc}"
-
-  echo "Updated ${zshrc} to load completions. Old file backed up as ${zshrc}.bak"
   echo "Completion script written to ${comp_dir}/_brudnopis"
   echo "Please restart your shell or run: source ~/.zshrc"
 }
@@ -135,7 +140,7 @@ function search_date_in_brudnopis() {
     }
 
     should_print { print }
-    ' "$file"
+    ' "${file}"
 }
 
 function repo_config() {
@@ -220,17 +225,21 @@ function main() {
     fi
   fi
 
-  if ! PARSED_ARGS=$(getopt --name brudnopis --options hrlgfs: \
-                    --longoptions help,repo,local,global,find,default,search:,edit-variables,print-variables,compleat -- "$@"); then
+  if ! PARSED_ARGS=$(getopt --name brudnopis --options hrlgfs:v \
+                    --longoptions help,repo,local,global,find,default,search:,edit-variables,print-variables,compleat,version -- "$@"); then
     help
     exit 1
   fi
-  eval set -- "$PARSED_ARGS"
+  eval set -- "${PARSED_ARGS}"
   
   while true; do
     case "$1" in 
       -h | --help)
         help
+        exit 0
+        ;;
+      -v | --version)
+        echo "${VERSION}"
         exit 0
         ;;
       -g | --global)
