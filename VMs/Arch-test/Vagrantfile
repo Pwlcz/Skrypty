@@ -1,0 +1,35 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+Vagrant.configure("2") do |config|
+  config.vm.define :arch_testing do |arch_testing|
+    arch_testing.vm.box = "arch1"
+    arch_testing.vm.network "private_network", ip: "192.168.69.69", netmask: "255.255.255.0"
+    
+    arch_testing.vm.synced_folder "~/Projekty/", "/home/vagrant/Projekty",
+    type: "nfs",
+    nfs_udp: false,
+    nfs_version: 4,
+    mount_options: ["tcp", "nolock", "actimeo=2"]
+    
+    arch_testing.vm.synced_folder ".", "/vagrant", type: "nfs", nfs_udp: false, nfs_version: 4, mount_options: ["tcp", "nolock", "actimeo=2"]
+
+    arch_testing.vm.provider :libvirt do |domain|
+      domain.memory = 4096
+      domain.cpus = 2
+      domain.nested = true
+      
+      # Enable SPICE graphics and a virtual GPU
+      domain.graphics_type = "spice"
+      domain.video_type = "virtio"
+      domain.video_vram = 256
+      
+      # Enable the SPICE channel for clipboard sharing and dynamic resizing
+      domain.channel type: "spicevmc", target_name: "com.redhat.spice.0", target_type: "virtio"
+    end
+    
+    arch_testing.vm.provision "shell", inline: <<-SHELL
+    sudo pacman -Syu --noconfirm
+    SHELL
+  end
+end
