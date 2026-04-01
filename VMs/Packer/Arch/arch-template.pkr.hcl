@@ -44,15 +44,9 @@ variable "write_zeros" {
   default = "true"
 }
 
-variable "install_desktop" {
-  type    = bool
-  default = false
-}
-
 locals {
   # Determines the build suffix
   build_date     = formatdate("YYYY.MM.DD", timestamp())
-  desktop_suffix = var.install_desktop ? ".desktop" : ""
 }
 
 source "qemu" "arch" {
@@ -88,17 +82,7 @@ build {
     script          = "scripts/cleanup.sh"
   }
 
-  dynamic "provisioner" {
-    for_each = var.install_desktop ? [1] : []
-    labels   = ["shell"]
-
-    content {
-      execute_command = "{{ .Vars }} sudo -E -S bash '{{ .Path }}'"
-      script          = "scripts/desktop-addons.sh"
-    }
-  }
-
   post-processor "vagrant" {
-    output = "output/packer_arch_{{ .Provider }}-${local.build_date}${local.desktop_suffix}.box"
+    output = "output/packer_arch_{{ .Provider }}-${local.build_date}.box"
   }
 }
