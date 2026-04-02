@@ -12,6 +12,11 @@ packer {
   }
 }
 
+variable "version" {
+  type    = string
+  default = "0.0.0"
+}
+
 variable "country" {
   type    = string
   default = "PL"
@@ -48,7 +53,7 @@ locals {
 }
 
 source "qemu" "archinstall" {
-  boot_command = ["<enter><wait10><wait10><wait10><wait10><wait10><wait10>",
+  boot_command = ["<enter><wait10><wait10><wait10><wait10><wait10><wait10><wait10><wait10><wait10>",
     "/usr/bin/curl -O http://{{ .HTTPIP }}:{{ .HTTPPort }}/enable-ssh.sh<enter><wait5>",
   "/usr/bin/bash ./enable-ssh.sh<enter>"]
   boot_wait        = "5s"

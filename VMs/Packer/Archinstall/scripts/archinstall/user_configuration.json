@@ -1,18 +1,5 @@
 {
-    "app_config": {
-        "audio_config": {
-            "audio": "pipewire"
-        },
-        "bluetooth_config": {
-            "enabled": false
-        },
-        "firewall_config": {
-            "firewall": "ufw"
-        },
-        "print_service_config": {
-            "enabled": false
-        }
-    },
+    "app_config": null,
     "archinstall-language": "English",
     "auth_config": {},
     "bootloader_config": {
@@ -39,7 +26,7 @@
                         "fs_type": "fat32",
                         "mount_options": [],
                         "mountpoint": "/boot",
-                        "obj_id": "ac1f50bb-0357-45c9-ba86-cd41a77a220d",
+                        "obj_id": "76ce646d-f4f8-4fe7-b773-d572e59dd34a",
                         "size": {
                             "sector_size": {
                                 "unit": "B",
@@ -66,7 +53,7 @@
                         "fs_type": "ext4",
                         "mount_options": [],
                         "mountpoint": "/",
-                        "obj_id": "5bce3701-4c7a-4736-bc38-c4731e74c18b",
+                        "obj_id": "cc312145-e0e1-491f-bd1f-1bc6438f643c",
                         "size": {
                             "sector_size": {
                                 "unit": "B",
@@ -93,7 +80,7 @@
     },
     "hostname": "archlinux",
     "kernels": [
-        "linux"
+        "linux-lts"
     ],
     "locale_config": {
         "kb_layout": "en",
@@ -127,8 +114,7 @@
     },
     "ntp": true,
     "packages": [
-        "dhcpcd",
-        "netctl"
+        "python3"
     ],
     "parallel_downloads": 0,
     "profile_config": {
