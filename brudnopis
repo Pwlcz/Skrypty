@@ -4,9 +4,10 @@
 #  It started as alias brudnopis="vim ~/brudnopis.txt", but evolved into this monstorosity.
 #  Config file is stored in ${HOME}/.config/brudnopis.conf
 #  Completion script for zsh is generated in ${HOME}/.zsh/completions/_brudnopis
+# TODO: docs for functions, better error handling, more options for searching, maybe support for other editors
 set -euo pipefail
 
-VERSION='0.1.0'
+VERSION='0.1.1'
 
 search_args=''
 
@@ -16,6 +17,17 @@ if [[ -f "${CONF_FILE}" ]]; then
   source "${CONF_FILE}"
 fi
 
+#######################################
+# Generate default config file
+# Globals:
+#   None
+# Arguments:
+#   None
+# Outputs:
+#   Default config file to ~/.config/brudnopis.conf
+# Returns:
+#   0 on success, non-zero on failure
+#######################################
 function restore_defaults() {
   mkdir -p "${HOME}/.config"
   cat > "${CONF_FILE}" << 'EOF'
@@ -35,6 +47,17 @@ flag_use_global=false
 EOF
 }
 
+#######################################
+# Function to display help message
+# Globals:
+#   None
+# Arguments:
+#   None
+# Outputs:
+#   Help message to stdout
+# Returns:
+#   0 on success, non-zero on failure
+#######################################
 function help() {
   cat << EOF
 Open txt file for temp notes. To use preferred editor edit the script config file.
@@ -61,6 +84,17 @@ Options:
 EOF
 }
 
+#######################################
+# Function to generate zsh completion script
+# Globals:
+#   None
+# Arguments:
+#   None
+# Outputs:
+#   Zsh completion script to ~/.zsh/completions/_brudnopis
+# Returns:
+#   0 on success, non-zero on failure
+#######################################
 function compleat() {
   local comp_dir="${HOME}/.zsh/completions"
   mkdir -p "${comp_dir}"
@@ -104,26 +138,50 @@ EOF
   echo "Please restart your shell or run: source ~/.zshrc"
 }
 
+#######################################
+# Helper function to find every brudnopis.txt in subdirs 
+# Globals:
+#   note_dir
+# Arguments:
+#   $dir -- from which dir to search, if not set = pwd
+# Outputs:
+#   find command output
+# Returns:
+#   0 on success, non-zero on failure
+#######################################
 function find_notes() {
   local dir="${1:-${note_dir}}"
   find "${dir}" -type f -name "${NOTE_FILE}" -exec ls -lh {} +  
 }
 
+#######################################
+# Helper function to find entries matching provided date
+# Globals:
+#   NOTE_FILE
+# Arguments:
+#   date_lookup
+#   mode
+# Outputs:
+#   all notes that matched the criteries
+# Returns:
+#   0 on success, non-zero on failure
+#######################################
+# TODO: shouldnt it be split to 2 args?
 function search_date_in_brudnopis() {
     local input_string="$1"
     local file="${NOTE_FILE}"
     local IFS=','
-    read -ra array <<< "$input_string"
+    read -ra array <<< "${input_string}"
 
     local raw_target="${array[0]}"
     local mode="${array[1]:="exact"}"        # "exact", "newer", "older"
 
     if ! target=$(date -d "${raw_target//./-}" +%Y-%m-%d 2>/dev/null); then
-        echo "Error: Could not understand date '$raw_target'"
+        echo "Error: Could not understand date '${raw_target}'"
         return 1
     fi
-    echo "Searching for date: $raw_target (parsed as $target) with mode: $mode in file: $file"
-    awk -v target="$target" -v mode="$mode" '
+    echo "Searching for date: ${raw_target} (parsed as ${target}) with mode: ${mode} in file: ${file}"
+    awk -v target="${target}" -v mode="${mode}" '
     /^[0-9]{4}\-[0-9]{2}\-[0-9]{2}/ {
         current_date = $1
 
@@ -143,17 +201,28 @@ function search_date_in_brudnopis() {
     ' "${file}"
 }
 
+#######################################
+# Helper function to interactively clean up multiple NOTE_FILE in git repo and add it to .gitignore
+# Globals:
+#   NOTE_FILE
+# Arguments:
+#   None
+# Outputs:
+#   User prompts
+# Returns:
+#   0 on success, non-zero on failure
+#######################################
 function repo_config() {
   if [[ -n "${repo_dir}" ]]; then
     printf "Configuring notes in git repo: %s\n" "${repo_dir}"
 
-    echo "Checking .gitignore for ${NOTE_FILE}..."
+    # echo "Checking .gitignore for ${NOTE_FILE}..."
     local gitignore_file="${repo_dir}/.gitignore"
 
     if [[ ! -f "${gitignore_file}" ]] || ! grep -q "${NOTE_FILE}" "${gitignore_file}"; then
-      read -rp "Add ${NOTE_FILE} to .gitignore? (y/n): " gitignore_choice
+      read -rp "Add ${NOTE_FILE} to .gitignore? [y/N]: " gitignore_choice
       if [[ "${gitignore_choice}" == [yY] ]]; then
-        echo "${NOTE_FILE}" >> "${repo_dir}/.gitignore"
+        echo -e "\n${NOTE_FILE}" >> "${repo_dir}/.gitignore"
         echo "Added ${NOTE_FILE} to .gitignore"
       else
         echo "Skipping adding to .gitignore."
@@ -162,16 +231,17 @@ function repo_config() {
       echo "${NOTE_FILE} is already in .gitignore"
     fi
 
-    echo "Notes in repo:"
+    echo "Note(s) in repo:"
     files_ls=$(find_notes "${repo_dir}")
     echo "${files_ls}"
     files_count=$(echo "${files_ls}" | wc -l)
 
     if (( files_count > 1 )); then
       echo "There are ${files_count} notes in the repo."
-      read -rp "Do you want to merge them into one note? (y/n): " merge_choice
+      read -rp "Do you want to merge them into one note? [y/N]: " merge_choice
       if [[ "${merge_choice}" == [yY] ]]; then
         echo "Merging notes..."
+        # TODO: add header above each merged file
         find "${repo_dir}" -type f -name "${NOTE_FILE}" -exec cat {} + >> "${repo_dir}/${NOTE_FILE}"
         echo "Merged notes into ${repo_dir}/${NOTE_FILE}"
         echo "Removing old notes..."
@@ -187,25 +257,67 @@ function repo_config() {
   fi
 }
 
+#######################################
+# Helper function to display config file
+# Globals:
+#   CONF_FILE
+# Arguments:
+#   None
+# Outputs:
+#   cat CONF_FILE to stdout
+# Returns:
+#   0 on success, non-zero on failure
+#######################################
 function print_vars() {
   echo "Variables are stored in ${CONF_FILE}"
   cat "${CONF_FILE}"
 }
 
+#######################################
+# Add timestamp before creating an entry in NOTE_FILE
+# Globals:
+#   NOTE_FILE
+# Arguments:
+#   None
+# Outputs:
+#   formatted date command to NOTE_FILE
+# Returns:
+#   0 on success, non-zero on failure
+#######################################
 function timestamp() {
   [[ ! -f "${NOTE_FILE}" ]] && touch "${NOTE_FILE}"
-
-  local last_line=''
-  last_line=$(tail -n 1 "${NOTE_FILE}")
-  {
-    if [[ -n "${last_line}" ]]; then
-      echo ''
-    fi
-    date "${DATE_FORMAT}"
-    echo ''
-  } >> "${NOTE_FILE}"
+  
+  mode="${1:-}"
+  case "${mode}" in
+    add)
+      local last_line=''
+      last_line=$(tail -n 1 "${NOTE_FILE}")
+      {
+        if [[ -n "${last_line}" ]]; then
+          echo ''
+        fi
+        date "${DATE_FORMAT}"
+        echo ''
+      } >> "${NOTE_FILE}"
+    ;;
+    rm)
+      head -n -2 "${NOTE_FILE}" > "${NOTE_FILE}.tmp" && mv "${NOTE_FILE}.tmp" "${NOTE_FILE}"
+    ;;
+    *) echo "invalid timestamp mode"; exit 1 ;;
+  esac
 }
 
+#######################################
+# Helper function passing additional arguments to NOTE_FILE
+# Globals:
+#   NOTE_FILE
+# Arguments:
+#   text -- takes all arguments as a string
+# Outputs:
+#   all args to NOTE_FILE
+# Returns:
+#   0 on success, non-zero on failure
+#######################################
 function quicknote() {
   text="$*"
   if [[ -n "${text}" ]]; then
@@ -213,6 +325,19 @@ function quicknote() {
   fi
 }
 
+#######################################
+# Function to edit NOTE_FILE
+# Globals:
+#   search_args
+#   CONF_FILE
+#   NOTE_FILE
+# Arguments:
+#   None
+# Outputs:
+#   Help message to stdout
+# Returns:
+#   0 on success, non-zero on failure
+#######################################
 function main() {
   if [[ "$*" != "--default" && ! -f ${CONF_FILE} ]]; then
     read -rp "Configuration file not found. Create default config at ${CONF_FILE}? [Y/n]: " create_conf_choice
@@ -220,14 +345,14 @@ function main() {
       restore_defaults
       source "${CONF_FILE}"
     else
-      echo "Cannot proceed without configuration file. Exiting."
+      echo "Cannot proceed without configuration file. Exiting." >&2
       exit 1
     fi
   fi
 
   if ! PARSED_ARGS=$(getopt --name brudnopis --options hrlgfs:v \
-                    --longoptions help,repo,local,global,find,default,search:,edit-variables,print-variables,compleat,version -- "$@"); then
-    help
+        --longoptions help,repo,local,global,find,default,search:,edit-variables,print-variables,compleat,version -- "$@"); then
+    help >&2
     exit 1
   fi
   eval set -- "${PARSED_ARGS}"
@@ -291,7 +416,7 @@ function main() {
   done
 
   if [[ "${flag_use_global}" == true && "${flag_force_local}" == true ]]; then
-    echo "Cannot use both --global and --local flags."
+    echo "Cannot use both --global and --local flags." >&2
     exit 1
   fi
 
@@ -315,19 +440,20 @@ function main() {
   fi
 
   if [[ -n "$*" ]]; then
-    timestamp
+    timestamp add
     quicknote "$*"
     exit 0
   fi
 
-  timestamp
+  timestamp add
   md5hash=$(md5sum "${NOTE_FILE}" | awk '{print $1}')
   
   "${EDITOR}" "${EDITOR_ARGS}" "${NOTE_FILE}"
   
+  # if no changes made, remove timestamp
   new_md5hash=$(md5sum "${NOTE_FILE}" | awk '{print $1}')
   if [[ "${md5hash}" == "${new_md5hash}" ]]; then
-    head -n -2 "${NOTE_FILE}" > "${NOTE_FILE}.tmp" && mv "${NOTE_FILE}.tmp" "${NOTE_FILE}"
+    timestamp rm
     echo "${NOTE_FILE} unchanged."
   fi
 }
