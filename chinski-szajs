@@ -1,0 +1,155 @@
+#!/usr/bin/env python3
+# Config crappy screen adapter
+# TODO: this probably wont work on Wayland
+
+from sys import exit as sys_exit
+import subprocess
+from typing import List, Tuple, Optional
+# --- Dependency Check ---
+try:
+    import click
+except ImportError:
+    print("ERROR: The 'click' library is not installed.")
+    print("This script requires 'click' to build the terminal interface.\n")
+    print("To install it system-wide, please run the command for your OS:")
+    print("  Debian/Ubuntu/Mint:  sudo apt install python3-click")
+    print("  Fedora:              sudo dnf install python3-click")
+    print("  Arch Linux:          sudo pacman -S python-click")
+    print("  Via pip:             pip install click")
+    sys_exit(1)
+# ------------------------
+
+SCRIPT_VERSION = "1.0.0"
+SCREEN_PRESET_RESOLUTIONS = [
+    "1920x1080",
+    "1600x900",
+    "1280x720",
+    "1024x768"
+]
+
+def run_command(command: str, ignore_errors: bool = False) -> str:
+    """Runs a shell command and returns the stdout as a string."""
+    try:
+        result = subprocess.run(
+            command, 
+            shell=True, 
+            check=True, 
+            capture_output=True, 
+            text=True
+        )
+        return result.stdout.strip()
+    except subprocess.CalledProcessError as e:
+        if ignore_errors:
+            # If the command fails but we expect it might (like recreating an existing mode),
+            # we print a quiet notice and move on instead of crashing.
+            click.secho(f"  [Notice] Command skipped (mode likely already exists).", fg="yellow", dim=True)
+            return ""
+            
+        raise click.ClickException(f"Command failed: {command}\n{e.stderr}")
+
+def get_connected_screens() -> List[str]:
+    """Parses xrandr output to find all currently connected screen names."""
+    output = run_command("xrandr")
+    screens: List[str] = []
+    
+    for line in output.splitlines():
+        if " connected" in line:
+            screens.append(line.split()[0])
+            
+    return screens
+
+def generate_modeline(width: int, height: int, refresh: int = 60) -> Tuple[str, str]:
+    """Uses cvt to generate VESA standard timing parameters (Modeline)."""
+    output = run_command(f"cvt {width} {height} {refresh}")
+    
+    for line in output.splitlines():
+        if line.strip().startswith("Modeline"):
+            parts = line.strip().split(maxsplit=2)
+            if len(parts) >= 3:
+                return parts[1], parts[2]
+    
+    raise click.ClickException(f"Failed to generate modeline for {width}x{height}@{refresh}Hz.")
+
+@click.command()
+@click.version_option(SCRIPT_VERSION, "-v", "--version", message="%(prog)s version %(version)s")
+@click.argument('screen_name', required=False)
+@click.argument('resolution_input', required=False)
+def main(screen_name: Optional[str], resolution_input: Optional[str]) -> None:
+    """
+    Automates creating and applying a new display resolution using xrandr.
+
+    If SCREEN_NAME or RESOLUTION_INPUT are omitted, the script will launch
+    an interactive menu to help you select them.
+    
+    \b
+    Examples:
+      chinski-szajs DisplayPort-0 1920x1080
+      chinski-szajs HDMI-A-0
+      chinski-szajs
+    """
+    connected_screens = get_connected_screens()
+    
+    if not connected_screens:
+        raise click.ClickException("No connected screens detected.")
+
+    # --- 1. DETERMINE SCREEN NAME ---
+    if screen_name not in connected_screens:
+        if screen_name:
+            click.secho(f"Warning: '{screen_name}' not found.", fg="yellow")
+        
+        click.echo("\n--- Available Connected Screens ---")
+        for i, screen in enumerate(connected_screens):
+            click.echo(f"{i + 1}. {screen}")
+        
+        choice = click.prompt("Select a screen by number (or type the exact name)", type=str).strip()
+        if choice.isdigit() and 1 <= int(choice) <= len(connected_screens):
+            screen_name = connected_screens[int(choice) - 1]
+        else:
+            screen_name = choice
+
+    if not screen_name:
+         raise click.ClickException("No screen name provided.")
+
+    # --- 2. DETERMINE RESOLUTION ---
+    if not resolution_input:
+        presets = SCREEN_PRESET_RESOLUTIONS
+        click.echo("\n--- Select Resolution ---")
+        for i, res in enumerate(presets):
+            click.echo(f"{i + 1}. {res}")
+        click.echo("0. Custom (e.g., 2560x1440)")
+        
+        choice = click.prompt("Select a resolution by number or type exactly (WxH)", type=str).strip()
+        if choice.isdigit() and 1 <= int(choice) <= len(presets):
+            resolution_input = presets[int(choice) - 1]
+        elif choice == '0':
+            resolution_input = click.prompt("Enter custom resolution (e.g., 1920x1080)", type=str).strip()
+        else:
+            resolution_input = choice
+
+    if not resolution_input:
+         raise click.ClickException("No resolution provided.")
+
+    try:
+        width_str, height_str = resolution_input.lower().split('x')
+        width = int(width_str)
+        height = int(height_str)
+    except ValueError:
+        raise click.ClickException("Invalid resolution format. Please use WxH (e.g., 1920x1080).")
+
+    # --- 3. APPLY SETTINGS ---
+    click.secho(f"\nGenerating modeline for {width}x{height} at 60Hz...", fg="cyan")
+    mode_name, mode_params = generate_modeline(width, height, 60)
+
+    click.secho(f"Applying mode {mode_name} to screen {screen_name}...", fg="cyan")
+    
+    # Add ignore_errors=True to the creation steps so it doesn't crash on subsequent runs
+    run_command(f"xrandr --newmode {mode_name} {mode_params}", ignore_errors=True)
+    run_command(f"xrandr --addmode {screen_name} {mode_name}", ignore_errors=True)
+    
+    # The final output command must still succeed
+    run_command(f"xrandr --output {screen_name} --mode {mode_name}", ignore_errors=False)
+    
+    click.secho("Done! Display should be updated.", fg="green", bold=True)
+
+if __name__ == "__main__":
+    main()
