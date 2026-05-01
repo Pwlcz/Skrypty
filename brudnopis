@@ -4,12 +4,13 @@
 #  It started as alias brudnopis="vim ~/brudnopis.txt", but evolved into this monstorosity.
 #  Config file is stored in ${HOME}/.config/brudnopis.conf
 #  Completion script for zsh is generated in ${HOME}/.zsh/completions/_brudnopis
-# TODO: docs for functions, better error handling, more options for searching, maybe support for other editors
 set -euo pipefail
 
-VERSION='0.1.1'
+VERSION='0.2.0'
 
-search_args=''
+search_date=''
+grep_pattern=''
+search_mode='exact'
 
 CONF_FILE="${HOME}/.config/brudnopis.conf"
 if [[ -f "${CONF_FILE}" ]]; then
@@ -35,7 +36,7 @@ function restore_defaults() {
 NOTE_FILE="${NOTE_FILE:=brudnopis.txt}"
 
 readonly EDITOR="${EDITOR:=vim}"
-readonly EDITOR_ARGS="${EDITOR_ARGS:=+}"
+readonly EDITOR_ARGS="${EDITOR_ARGS:-}"
 readonly GENERAL_NOTE_FILE="${GENERAL_NOTE_FILE:=${HOME}/Dokumenty/brudnopis_general.txt}"
 readonly DATE_FORMAT="+%Y-%m-%d %A %R:%S"
 
@@ -72,15 +73,14 @@ Options:
   -l, --local               Force opening note in current dir
   -r, --repo                Config notes in git repo
   -f, --find                Find all notes in current dir and subdirs
+  --grep PATTERN            Search note content by text (case-insensitive)
   --compleat                Generate zsh completion script
   --print-variables         Print current program variables
   --edit-variables          Edit program variables in ${CONF_FILE}
   --default                 Restore default configuration in ${CONF_FILE}
-  -s, --search [date,mode]  Search notes by date. Mode: exact, newer, older
-                            Can interpret dates like 2024-06-15, "June 15, 2024" today, yesterday, "3 days ago"
-                            If mode is omitted, defaults to exact.
-                            If date contains spaces, enclose it in quotes.
-                            Example: brudnopis --search 2024-06-15,exact
+  -s, --search DATE [MODE]  Search notes by date. MODE: exact, newer, older (default: exact)
+                            DATE can be: 2024-06-15, "June 15, 2024", today, yesterday, "3 days ago"
+                            Example: brudnopis --search 2024-06-15 exact
 EOF
 }
 
@@ -110,7 +110,7 @@ _brudnopis() {
     '(-l --local)'{-l,--local}'[Force opening note in current dir]'
     '(-r --repo)'{-r,--repo}'[Config notes in git repo]'
     '(-f --find)'{-f,--find}'[Find all notes recursively]'
-    '(-s --search)'{-s,--search}'[Search notes by date]:date string'
+    '(-s --search)'{-s,--search}'[Search notes by date]:date string: :(exact newer older)'
     '--compleat[Generate completion script]'
     '--print-variables[Print debug variables]'
     '--edit-variables[Edit config file]'
@@ -143,15 +143,22 @@ EOF
 # Globals:
 #   note_dir
 # Arguments:
-#   $dir -- from which dir to search, if not set = pwd
+#   $1 (optional) - directory to search from; defaults to PWD
 # Outputs:
-#   find command output
+#   find command output with file details
 # Returns:
-#   0 on success, non-zero on failure
+#   0 if files found or directory exists, 1 if directory not accessible
 #######################################
 function find_notes() {
   local dir="${1:-${note_dir}}"
-  find "${dir}" -type f -name "${NOTE_FILE}" -exec ls -lh {} +  
+  if [[ ! -d "${dir}" ]]; then
+    echo "Error: Directory '${dir}' does not exist or is not accessible" >&2
+    return 1
+  fi
+  find "${dir}" -type f -name "${NOTE_FILE}" -exec ls -lh {} + 2>/dev/null || {
+    echo "Warning: Failed to list some note files in ${dir}" >&2
+    return 1
+  }
 }
 
 #######################################
@@ -159,25 +166,29 @@ function find_notes() {
 # Globals:
 #   NOTE_FILE
 # Arguments:
-#   date_lookup
-#   mode
+#   $1 - date_lookup: date string to search for (required)
+#   $2 - mode: search mode "exact", "newer", or "older" (defaults to "exact")
 # Outputs:
-#   all notes that matched the criteries
+#   all notes matching the date criteria, or error message
 # Returns:
-#   0 on success, non-zero on failure
+#   0 on success, 1 on date parse error or file not found
 #######################################
-# TODO: shouldnt it be split to 2 args?
 function search_date_in_brudnopis() {
-    local input_string="$1"
+    if [[ -z "${1:-}" ]]; then
+      echo "Error: search_date_in_brudnopis requires a date argument" >&2
+      return 1
+    fi
+    if [[ ! -f "${NOTE_FILE}" ]]; then
+      echo "Error: Note file '${NOTE_FILE}' does not exist" >&2
+      return 1
+    fi
+    
+    local raw_target="$1"
+    local mode="${2:-exact}"                  # "exact", "newer", "older"
     local file="${NOTE_FILE}"
-    local IFS=','
-    read -ra array <<< "${input_string}"
-
-    local raw_target="${array[0]}"
-    local mode="${array[1]:="exact"}"        # "exact", "newer", "older"
 
     if ! target=$(date -d "${raw_target//./-}" +%Y-%m-%d 2>/dev/null); then
-        echo "Error: Could not understand date '${raw_target}'"
+        echo "Error: Could not understand date '${raw_target}'" >&2
         return 1
     fi
     echo "Searching for date: ${raw_target} (parsed as ${target}) with mode: ${mode} in file: ${file}"
@@ -202,28 +213,35 @@ function search_date_in_brudnopis() {
 }
 
 #######################################
-# Helper function to interactively clean up multiple NOTE_FILE in git repo and add it to .gitignore
+# Helper function to interactively clean up multiple NOTE_FILE in git repo
+# Merges multiple note files and adds to .gitignore
 # Globals:
-#   NOTE_FILE
+#   NOTE_FILE, repo_dir
 # Arguments:
 #   None
 # Outputs:
-#   User prompts
+#   User prompts and status messages
 # Returns:
-#   0 on success, non-zero on failure
+#   0 on success, 1 if not in a git repository
 #######################################
 function repo_config() {
-  if [[ -n "${repo_dir}" ]]; then
+  if [[ -z "${repo_dir}" ]]; then
+    echo "Error: Not in a git repository." >&2
+    return 1
+  fi
     printf "Configuring notes in git repo: %s\n" "${repo_dir}"
 
-    # echo "Checking .gitignore for ${NOTE_FILE}..."
     local gitignore_file="${repo_dir}/.gitignore"
 
     if [[ ! -f "${gitignore_file}" ]] || ! grep -q "${NOTE_FILE}" "${gitignore_file}"; then
       read -rp "Add ${NOTE_FILE} to .gitignore? [y/N]: " gitignore_choice
       if [[ "${gitignore_choice}" == [yY] ]]; then
-        echo -e "\n${NOTE_FILE}" >> "${repo_dir}/.gitignore"
-        echo "Added ${NOTE_FILE} to .gitignore"
+        if echo -e "\n${NOTE_FILE}" >> "${repo_dir}/.gitignore"; then
+          echo "Added ${NOTE_FILE} to .gitignore"
+        else
+          echo "Error: Failed to add ${NOTE_FILE} to .gitignore" >&2
+          return 1
+        fi
       else
         echo "Skipping adding to .gitignore."
       fi
@@ -232,7 +250,10 @@ function repo_config() {
     fi
 
     echo "Note(s) in repo:"
-    files_ls=$(find_notes "${repo_dir}")
+    if ! files_ls=$(find_notes "${repo_dir}" 2>/dev/null); then
+      echo "No notes in ${repo_dir}" >&2
+      return 0
+    fi
     echo "${files_ls}"
     files_count=$(echo "${files_ls}" | wc -l)
 
@@ -241,20 +262,57 @@ function repo_config() {
       read -rp "Do you want to merge them into one note? [y/N]: " merge_choice
       if [[ "${merge_choice}" == [yY] ]]; then
         echo "Merging notes..."
-        # TODO: add header above each merged file
-        find "${repo_dir}" -type f -name "${NOTE_FILE}" -exec cat {} + >> "${repo_dir}/${NOTE_FILE}"
+        if ! find "${repo_dir}" -type f -name "${NOTE_FILE}" ! -path "${repo_dir}/${NOTE_FILE}" | while read -r file; do
+        {
+          echo "=== From: $(realpath --relative-to="${repo_dir}" "${file}") ==="
+          cat "${file}" || echo "Error: Failed to read ${file}" >&2
+          echo ""
+        } >> "${repo_dir}/${NOTE_FILE}"
+        done; then
+          echo "Warning: Some files failed to merge" >&2
+        fi
         echo "Merged notes into ${repo_dir}/${NOTE_FILE}"
         echo "Removing old notes..."
-        find "${repo_dir}" -type f -name "${NOTE_FILE}" ! -path "${repo_dir}/${NOTE_FILE}" -exec rm {} +
+        if ! find "${repo_dir}" -type f -name "${NOTE_FILE}" ! -path "${repo_dir}/${NOTE_FILE}" -exec rm {} + 2>/dev/null; then
+          echo "Error: Failed to remove all old note files" >&2
+          return 1
+        fi
         echo "Old notes removed."
       else
         echo "Merge cancelled."
       fi
     fi
+}
 
-  else
-    echo "Not in a git repo."
-  fi
+#######################################
+# Search note file content by text pattern (case-insensitive)
+# Globals:
+#   NOTE_FILE
+# Arguments:
+#   $1 - grep_pattern: text pattern to search for (required)
+# Outputs:
+#   matching lines with line numbers, or error message\n# Returns:\n#   0 on success, 1 if pattern not found or file not found
+#######################################
+function search_text_in_brudnopis() {
+    if [[ -z "${1:-}" ]]; then
+      echo "Error: search_text_in_brudnopis requires a pattern argument" >&2
+      return 1
+    fi
+    if [[ ! -f "${NOTE_FILE}" ]]; then
+      echo "Error: Note file '${NOTE_FILE}' does not exist" >&2
+      return 1
+    fi
+    
+    local pattern="$1"
+    local file="${NOTE_FILE}"
+    
+    echo "Searching for pattern: '${pattern}' in file: ${file}" >&2
+    if grep -in "${pattern}" "${file}"; then
+      return 0
+    else
+      echo "No matches found for pattern: '${pattern}'" >&2
+      return 1
+    fi
 }
 
 #######################################
@@ -274,61 +332,130 @@ function print_vars() {
 }
 
 #######################################
-# Add timestamp before creating an entry in NOTE_FILE
+# Creates or removes a timestamp in the note file
 # Globals:
-#   NOTE_FILE
+#   NOTE_FILE, DATE_FORMAT
 # Arguments:
-#   None
+#   $1 - mode: "add" to add timestamp, "rm" to remove last timestamp
 # Outputs:
-#   formatted date command to NOTE_FILE
+#   Status messages, or error message if invalid mode
 # Returns:
-#   0 on success, non-zero on failure
+#   0 on success, 1 on failure or invalid mode
 #######################################
 function timestamp() {
-  [[ ! -f "${NOTE_FILE}" ]] && touch "${NOTE_FILE}"
+  if [[ ! -f "${NOTE_FILE}" ]]; then
+    if ! touch "${NOTE_FILE}" 2>/dev/null; then
+      echo "Error: Failed to create note file '${NOTE_FILE}'" >&2
+      return 1
+    fi
+  fi
   
-  mode="${1:-}"
+  local mode="${1:-}"
   case "${mode}" in
     add)
       local last_line=''
-      last_line=$(tail -n 1 "${NOTE_FILE}")
+      last_line=$(tail -n 1 "${NOTE_FILE}" 2>/dev/null || echo '')
       {
         if [[ -n "${last_line}" ]]; then
           echo ''
         fi
-        date "${DATE_FORMAT}"
+        date "${DATE_FORMAT}" || echo "Error: date command failed" >&2
         echo ''
-      } >> "${NOTE_FILE}"
+      } >> "${NOTE_FILE}" || {
+        echo "Error: Failed to write timestamp to '${NOTE_FILE}'" >&2
+        return 1
+      }
     ;;
     rm)
-      head -n -2 "${NOTE_FILE}" > "${NOTE_FILE}.tmp" && mv "${NOTE_FILE}.tmp" "${NOTE_FILE}"
+      if ! head -n -2 "${NOTE_FILE}" > "${NOTE_FILE}.tmp" || ! mv "${NOTE_FILE}.tmp" "${NOTE_FILE}"; then
+        echo "Error: Failed to remove timestamp from '${NOTE_FILE}'" >&2
+        rm -f "${NOTE_FILE}.tmp"
+        return 1
+      fi
     ;;
-    *) echo "invalid timestamp mode"; exit 1 ;;
+    *) 
+      echo "Error: Invalid timestamp mode '${mode}'. Must be 'add' or 'rm'" >&2
+      return 1
+    ;;
   esac
 }
 
 #######################################
-# Helper function passing additional arguments to NOTE_FILE
+# Helper function to append text to NOTE_FILE
 # Globals:
 #   NOTE_FILE
 # Arguments:
-#   text -- takes all arguments as a string
+#   $* - text to append (all arguments concatenated)
 # Outputs:
-#   all args to NOTE_FILE
+#   Error message if file write fails
 # Returns:
-#   0 on success, non-zero on failure
+#   0 on success, 1 if no text or write fails
 #######################################
 function quicknote() {
-  text="$*"
-  if [[ -n "${text}" ]]; then
-    echo "${text}" >> "${NOTE_FILE}"
+  local text="$*"
+  if [[ -z "${text}" ]]; then
+    echo "Warning: No text provided to quicknote" >&2
+    return 1
   fi
+  if ! echo "${text}" >> "${NOTE_FILE}" 2>/dev/null; then
+    echo "Error: Failed to write to note file '${NOTE_FILE}'" >&2
+    return 1
+  fi
+}
+
+#######################################
+# Open the note file in the configured editor
+# Automatically enables syntax highlighting for timestamps in vim/nvim
+# Supports vim, nvim and other editors with graceful fallback
+# Globals:
+#   EDITOR, EDITOR_ARGS, NOTE_FILE
+# Arguments:
+#   None
+# Outputs:
+#   Editor session output, or error message if editor not found
+# Returns:
+#   editor exit status, or 1 if editor command fails
+#######################################
+function open_editor() {
+  if ! command -v "${EDITOR%% *}" &> /dev/null; then
+    echo "Error: Editor '${EDITOR}' not found or not executable" >&2
+    return 1
+  fi
+  
+  local editor_bin="${EDITOR%% *}"
+  local editor_name="${editor_bin##*/}"
+  local editor_args=()
+
+  # Configure editor-specific arguments
+  case "${editor_name}" in
+    vim | nvim)
+      editor_args+=("+syntax enable")
+      editor_args+=("+syntax match BrudnopisTimestamp /^\\d\\{4\\}-\\d\\{2\\}-\\d\\{2\\} .*$/")
+      editor_args+=("+highlight BrudnopisTimestamp ctermfg=Green guifg=Green")
+      if [[ -n "${EDITOR_ARGS}" ]]; then
+        editor_args+=("${EDITOR_ARGS}")
+      else
+        editor_args+=("+")
+      fi
+      ;;
+    *)
+      # Generic editor support - just pass EDITOR_ARGS if set
+      if [[ -n "${EDITOR_ARGS}" ]]; then
+        editor_args+=("${EDITOR_ARGS}")
+      fi
+      ;;
+  esac
+
+  editor_args+=("${NOTE_FILE}")
+  ${EDITOR} "${editor_args[@]}" || {
+    echo "Error: Editor exited with status $?" >&2
+    return 1
+  }
 }
 
 #######################################
 # Function to edit NOTE_FILE
 # Globals:
-#   search_args
 #   CONF_FILE
 #   NOTE_FILE
 # Arguments:
@@ -351,7 +478,7 @@ function main() {
   fi
 
   if ! PARSED_ARGS=$(getopt --name brudnopis --options hrlgfs:v \
-        --longoptions help,repo,local,global,find,default,search:,edit-variables,print-variables,compleat,version -- "$@"); then
+        --longoptions help,repo,local,global,find,default,search:,grep:,edit-variables,print-variables,compleat,version -- "$@"); then
     help >&2
     exit 1
   fi
@@ -389,8 +516,28 @@ function main() {
         exit 0
         ;;
       -s | --search)
-        search_args="$2"
-        shift 2
+        shift
+        search_date="$1"
+        if [[ -z "${search_date:-}" ]]; then
+          echo "Error: --search requires a date." >&2
+          exit 1
+        fi
+        shift
+        if [[ "$1" == "exact" || "$1" == "newer" || "$1" == "older" ]]; then
+          search_mode="$1"
+          shift
+        else
+          search_mode="exact"
+        fi
+        ;;
+      --grep)
+        shift
+        grep_pattern="$1"
+        if [[ -z "${grep_pattern:-}" ]]; then
+          echo "Error: --grep requires a search pattern." >&2
+          exit 1
+        fi
+        shift
         ;;
       --print-variables)
         print_vars
@@ -434,8 +581,13 @@ function main() {
 
   fi
 
-  if [[ -n "${search_args}" ]]; then
-    search_date_in_brudnopis "${search_args}"
+  if [[ -n "${search_date:-}" ]]; then
+    search_date_in_brudnopis "${search_date}" "${search_mode:-exact}"
+    exit 0
+  fi
+
+  if [[ -n "${grep_pattern:-}" ]]; then
+    search_text_in_brudnopis "${grep_pattern}"
     exit 0
   fi
 
@@ -448,7 +600,7 @@ function main() {
   timestamp add
   md5hash=$(md5sum "${NOTE_FILE}" | awk '{print $1}')
   
-  "${EDITOR}" "${EDITOR_ARGS}" "${NOTE_FILE}"
+  open_editor
   
   # if no changes made, remove timestamp
   new_md5hash=$(md5sum "${NOTE_FILE}" | awk '{print $1}')
