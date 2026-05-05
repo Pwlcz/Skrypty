@@ -6,7 +6,7 @@
 #  Completion script for zsh is generated in ${HOME}/.zsh/completions/_brudnopis
 set -euo pipefail
 
-VERSION='0.2.0'
+VERSION='0.2.1'
 
 search_date=''
 grep_pattern=''
@@ -432,6 +432,8 @@ function open_editor() {
       editor_args+=("+syntax enable")
       editor_args+=("+syntax match BrudnopisTimestamp /^\\d\\{4\\}-\\d\\{2\\}-\\d\\{2\\} .*$/")
       editor_args+=("+highlight BrudnopisTimestamp ctermfg=Green guifg=Green")
+      editor_args+=("+syntax match BrudnopisTodo /TODO/")
+      editor_args+=("+highlight BrudnopisTodo ctermfg=Black ctermbg=Yellow guifg=Black guibg=Yellow cterm=bold gui=bold")
       if [[ -n "${EDITOR_ARGS}" ]]; then
         editor_args+=("${EDITOR_ARGS}")
       else
