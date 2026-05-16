@@ -6,7 +6,7 @@
 #  Completion script for zsh is generated in ${HOME}/.zsh/completions/_brudnopis
 set -euo pipefail
 
-VERSION='0.2.1'
+VERSION='0.2.2'
 
 search_date=''
 grep_pattern=''
@@ -236,7 +236,7 @@ function repo_config() {
     if [[ ! -f "${gitignore_file}" ]] || ! grep -q "${NOTE_FILE}" "${gitignore_file}"; then
       read -rp "Add ${NOTE_FILE} to .gitignore? [y/N]: " gitignore_choice
       if [[ "${gitignore_choice}" == [yY] ]]; then
-        if echo -e "\n${NOTE_FILE}" >> "${repo_dir}/.gitignore"; then
+        if echo -e "${NOTE_FILE}" >> "${repo_dir}/.gitignore"; then
           echo "Added ${NOTE_FILE} to .gitignore"
         else
           echo "Error: Failed to add ${NOTE_FILE} to .gitignore" >&2
