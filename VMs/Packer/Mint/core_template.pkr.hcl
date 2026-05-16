@@ -187,6 +187,7 @@ build {
     expect_disconnect = true
     pause_before      = "0s"
     scripts = [
+      "script/rm_apps.sh",
       "script/update.sh",
       "script/reboot.sh"
     ]

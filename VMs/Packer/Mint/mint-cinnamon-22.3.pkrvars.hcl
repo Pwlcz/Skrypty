@@ -10,6 +10,8 @@ cpus = 2
 
 disk_size = 60000
 
+headless = true
+
 iso_checksum_type = "file"
 
 iso_checksum = "https://mirrors.edge.kernel.org/linuxmint/stable/22.3/sha256sum.txt"
