@@ -1,0 +1,163 @@
+#!/bin/bash -eu
+# basic script to build a box from a Packer project and add it to Vagrant
+# features:
+# formats and validates templates in the current directory.
+# (for local use) uncrypts HCP credentials to push to Vagrant Cloud
+# builds box using the -only flag and adds to Vagrant if build successful
+
+# Display help message
+function help() {
+  cat << EOF
+Usage: $0 [options] <target_os> [box_name]
+
+Arguments:
+  target_os          The OS to build (e.g., arch, mint)
+  box_name           Optional name for the Vagrant box (default: <target_os>-<date>)
+
+Options:
+  -h, --help         Show this help message and exit
+  -v, --varfile      Override the default Packer variable file
+EOF
+}
+
+# Cleanup / trap function
+# shellcheck disable=SC2317 # function is called via trap, not directly
+function cleanup() {
+  rm -f "${TIME_MARKER:-}" 2>/dev/null || true
+  flock -u "${LOCK_FD}" 2>/dev/null || true
+  eval "exec ${LOCK_FD}>&-" 2>/dev/null || true
+}
+
+function main() {
+  # Acquire a non-blocking lock to prevent concurrent runs
+  LOCK_FILE="/tmp/mkbox.lock"
+  
+  exec {LOCK_FD}>"${LOCK_FILE}" || { echo "Cannot open lock file ${LOCK_FILE}"; exit 1; }
+  
+  if ! flock -n "${LOCK_FD}"; then
+    echo "mkbox already running (lock held by another process). Exiting."
+    exit 1
+  fi
+
+  trap cleanup EXIT
+
+  if ! PARSED_ARGS=$(getopt --name mkbox --options hv: --longoptions help,varfile: -- "$@"); then
+    help >&2
+    exit 1
+  fi
+  eval set -- "${PARSED_ARGS}"
+
+  OVERRIDE_VARFILE=""
+
+  while true; do
+    case "$1" in
+      -h|--help)
+        help
+        exit 0
+        ;;
+      -v|--varfile)
+        OVERRIDE_VARFILE="$2"
+        shift 2
+        ;;
+      --)
+        shift
+        break
+        ;;
+      *)
+        shift
+        ;;
+    esac
+  done
+
+  TARGET_OS="${1:-}"
+  BOX_NAME="${2:-${TARGET_OS}-$(date +%Y.%m.%d)}"
+
+  if [[ -z "${TARGET_OS}" ]]; then
+    echo "Error: You must specify a target OS."
+    help
+    exit 1
+  fi
+
+  # 1. Map target OS to build name and default varfile
+  if [[ "${TARGET_OS}" == "arch" ]]; then
+    BUILD_NAME="arch"
+    VARFILE="arch.pkrvars.hcl"
+  elif [[ "${TARGET_OS}" == "mint" ]]; then
+    BUILD_NAME="linux-mint"
+    VARFILE="mint.pkrvars.hcl"
+  else
+    echo "Error: Unknown target OS '${TARGET_OS}'."
+    echo "Valid options are: arch, mint"
+    exit 1
+  fi
+
+  # Apply varfile override if passed via -v
+  if [[ -n "${OVERRIDE_VARFILE}" ]]; then
+    VARFILE="${OVERRIDE_VARFILE}"
+  fi
+
+  if [[ ! -f "${VARFILE}" ]]; then
+    echo "Error: Variable file '${VARFILE}' not found in current directory."
+    exit 1
+  fi
+
+  TIME_MARKER=$(mktemp /tmp/mkbox.time.XXXX)
+
+  echo -e "\e[1;32m==> Target OS: ${TARGET_OS} (Build: ${BUILD_NAME})\e[0m"
+  echo -e "\e[1;32m==> Using varfile: ${VARFILE}\e[0m"
+
+  echo -e "\e[1;32m==> Formatting templates\e[0m"
+  # Format all .pkr.hcl files in the current directory
+  if packer fmt .; then
+    echo "Packer templates are properly formatted."
+  else
+    echo "Error: Packer templates have formatting issues."
+    exit 1
+  fi
+
+  if [[ -f hcp-env.sh.gpg ]]; then
+    echo -e "\e[1;32m==> Loading HCP credentials\e[0m"
+    if source <(gpg --decrypt --quiet hcp-env.sh.gpg 2>/dev/null); then
+      echo "Loaded HCP credentials from hcp-env.sh.gpg"
+    else
+      echo "Warning: failed to decrypt hcp-env.sh.gpg (ensure gpg agent/passphrase available)"
+    fi
+  fi
+
+  echo -e "\e[1;32m==> Validating Packer templates for target: ${TARGET_OS}\e[0m"
+  # Validate against the directory using -only
+  if packer validate -only="${BUILD_NAME}.*" -var-file="${VARFILE}" .; then
+    echo "Packer configuration is valid."
+  else
+    echo "Error: Packer configuration is invalid."
+    exit 1
+  fi
+
+  echo -e "\e[1;32m==> Building box\e[0m"
+  # Build against the directory using -only
+  if packer build -only="${BUILD_NAME}.*" -var-file="${VARFILE}" .; then
+    build_ok=true
+  else
+    build_ok=false
+  fi
+
+  DIR_TO_CHECK="output"
+
+  if [[ "${build_ok}" == "true" ]]; then
+    echo -e "\e[1;32m==> Adding box to Vagrant\e[0m"
+
+    # Search dynamically in nested provider directories (e.g., output/qemu/)
+    find "${DIR_TO_CHECK}" -type f -name "*.box" -newer "${TIME_MARKER}" | while read -r new_file; do
+      echo "Adding ${new_file} to Vagrant as ${BOX_NAME}..."
+      vagrant box add --name "${BOX_NAME}" "${new_file}" --force
+    done
+  fi
+
+  if [[ "${build_ok:-false}" == "true" ]]; then
+    exit 0
+  else
+    exit 1
+  fi
+}
+
+main "$@"

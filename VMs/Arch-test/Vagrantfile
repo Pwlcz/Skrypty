@@ -3,7 +3,7 @@
 
 Vagrant.configure("2") do |config|
   config.vm.define :arch_testing do |arch_testing|
-    arch_testing.vm.box = "archinstall"
+    arch_testing.vm.box = "arch-2026.05.31"
     arch_testing.vm.network "private_network", ip: "192.168.69.69", netmask: "255.255.255.0"
     
     arch_testing.vm.synced_folder "~/Projekty/", "/home/vagrant/Projekty",

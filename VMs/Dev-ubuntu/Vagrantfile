@@ -1,0 +1,26 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+Vagrant.configure("2") do |config|
+  config.vm.box = "bento/ubuntu-24.04"
+  config.vm.provider :libvirt do |domain|
+    domain.memory = 4096
+    domain.cpus = 2
+    domain.nested = true
+    
+    # Enable SPICE graphics and a virtual GPU
+    domain.graphics_type = "spice"
+    domain.video_type = "virtio"
+    domain.video_vram = 256
+    
+    # Enable the SPICE channel for clipboard sharing and dynamic resizing
+    domain.channel type: "spicevmc", target_name: "com.redhat.spice.0", target_type: "virtio"
+  end
+
+  config.vm.define "Dev-ubuntu" do |ubuntu|
+    ubuntu.vm.hostname = "Dev-ubuntu"
+    ubuntu.vm.synced_folder ".", "/vagrant", type: "nfs", nfs_udp: false, nfs_version: 4, mount_options: ["tcp", "nolock", "actimeo=2"]
+    ubuntu.vm.synced_folder "~/Projekty", "/Projekty", type: "nfs", nfs_udp: false, nfs_version: 4, mount_options: ["tcp", "nolock", "actimeo=2"]
+  end
+  config.vm.provision "shell", path: "provision.sh"
+end

@@ -10,4 +10,3 @@ systemctl start qemu-guest-agent || true
 echo '==> Enabling and starting spice-vdagent service'
 systemctl enable spice-vdagent
 systemctl start spice-vdagent || true
-
