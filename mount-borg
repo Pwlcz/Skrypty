@@ -1,0 +1,33 @@
+#!/bin/bash
+# Interactively mount a backup archive
+set -e
+
+REPO="${1:-${HOME}/borg_backup}"
+MOUNT_POINT="${2:-${HOME}/borg_restore}"
+
+# Fetch a list of archives dynamically into an array
+mapfile -t archives < <(borg list --short "${REPO}")
+
+if [[ ${#archives[@]} -eq 0 ]]; then
+  echo "No archives found in ${REPO}"
+  exit 1
+fi
+
+PS3="Select an archive to mount (or press Ctrl+C to exit): "
+
+echo "==> Available Backup Archives"
+
+select selected_archive in "${archives[@]}"; do
+  if [[ -n "${selected_archive}" ]]; then
+    echo "Mounting '${selected_archive}' to ${MOUNT_POINT}..."
+    mkdir -p "${MOUNT_POINT}"
+    
+    # Mount the specific archive
+    borg mount "${REPO}::${selected_archive}" "${MOUNT_POINT}"
+    
+    echo "Mounted successfully. Don't forget to 'borg umount ${MOUNT_POINT}' when done."
+    break
+  else
+    echo "Invalid selection. Please choose a valid number." >&2
+  fi
+done

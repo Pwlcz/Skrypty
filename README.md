@@ -4,6 +4,7 @@
 | ----- | ---------- |
 | brudnopis | simple note taking for non permanent stuff |
 | backups | ~~my automated backup system~~ <br> Moved to separate repo |
-| VMs | Vagrantfiles and Packer configs |
+| mount-borg | Interactively mount a backup archive |
+| VMs | Vagrant and Packer configs / scripts |
 | chinski-szajs | xrandr for semiuseless adapter |
 | aliases | it is what it is |
