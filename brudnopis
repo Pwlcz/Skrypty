@@ -6,17 +6,7 @@
 #  Completion script for zsh is generated in ${HOME}/.zsh/completions/_brudnopis
 set -euo pipefail
 
-VERSION='0.2.2'
-
-search_date=''
-grep_pattern=''
-search_mode='exact'
-
-CONF_FILE="${HOME}/.config/brudnopis.conf"
-if [[ -f "${CONF_FILE}" ]]; then
-  # shellcheck source=${HOME}/.config/brudnopis.conf
-  source "${CONF_FILE}"
-fi
+VERSION='0.2.3'
 
 #######################################
 # Generate default config file
@@ -472,6 +462,7 @@ function main() {
     read -rp "Configuration file not found. Create default config at ${CONF_FILE}? [Y/n]: " create_conf_choice
     if [[ "${create_conf_choice}" == [yY] || -z "${create_conf_choice}" ]]; then
       restore_defaults
+      # shellcheck disable=SC1090
       source "${CONF_FILE}"
     else
       echo "Cannot proceed without configuration file. Exiting." >&2
@@ -525,12 +516,13 @@ function main() {
           exit 1
         fi
         shift
-        if [[ "$1" == "exact" || "$1" == "newer" || "$1" == "older" ]]; then
-          search_mode="$1"
+        if [[ "$2" == "exact" || "$2" == "newer" || "$2" == "older" ]]; then
+          search_mode="$2"
           shift
         else
           search_mode="exact"
         fi
+        break
         ;;
       --grep)
         shift
@@ -611,5 +603,15 @@ function main() {
     echo "${NOTE_FILE} unchanged."
   fi
 }
+
+search_date=''
+grep_pattern=''
+search_mode=''
+
+CONF_FILE="${HOME}/.config/brudnopis.conf"
+if [[ -f "${CONF_FILE}" ]]; then
+  # shellcheck disable=SC1090
+  source "${CONF_FILE}"
+fi
 
 main "$@"
