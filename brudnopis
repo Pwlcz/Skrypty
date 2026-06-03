@@ -6,7 +6,7 @@
 #  Completion script for zsh is generated in ${HOME}/.zsh/completions/_brudnopis
 set -euo pipefail
 
-VERSION='0.2.3'
+VERSION='0.2.4'
 
 #######################################
 # Generate default config file
@@ -601,6 +601,11 @@ function main() {
   if [[ "${md5hash}" == "${new_md5hash}" ]]; then
     timestamp rm
     echo "${NOTE_FILE} unchanged."
+  fi
+
+  if [[ ! -s "${NOTE_FILE}" ]]; then
+    rm "${NOTE_FILE}"
+    echo "Note file was empty and has been removed."
   fi
 }
 
