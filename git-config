@@ -8,7 +8,7 @@ function help() {
   cat << EOF
 Interactively set basic global git config. With optional setup for handling gpg.
 
-Usage: git-config.sh [Options]
+Usage: git-config [Options]
 
 Options:
   -h,   --help        display this message
@@ -68,7 +68,7 @@ function detect_shell_rc_file() {
 
 function append_gpg_ssh_setup() {
   local shellrc="$1"
-  local marker="# >>> git-config.sh gpg ssh >>>"
+  local marker="# >>> git-config gpg ssh >>>"
 
   mkdir -p "$HOME/.gnupg"
   if ! grep -Fq "enable-ssh-support" "$HOME/.gnupg/gpg-agent.conf" 2>/dev/null; then
@@ -86,14 +86,14 @@ function append_gpg_ssh_setup() {
 
   if ! grep -Fq "$marker" "$shellrc" 2>/dev/null; then
     cat >> "$shellrc" <<'EOF'
-# >>> git-config.sh gpg ssh >>>
+# >>> git-config gpg ssh >>>
 unset SSH_AGENT_PID
 if [ "${gnupg_SSH_AUTH_SOCK_by:-0}" -ne $$ ]; then
   export SSH_AUTH_SOCK="$(gpgconf --list-dirs agent-ssh-socket)"
 fi
 export GPG_TTY=$(tty)
 gpg-connect-agent updatestartuptty /bye >/dev/null
-# <<< git-config.sh gpg ssh <<<
+# <<< git-config gpg ssh <<<
 EOF
   fi
 }
