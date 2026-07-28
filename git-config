@@ -17,19 +17,16 @@ EOF
 }
 
 function echo_error() {
-  local message="$1"
-  echo -e "\e[31mError: ${message}\e[0m" >&2 # Red
+  echo -e "\e[31mError: $*\e[0m" >&2 # Red
 }
 
 function echo_ok() {
-  local message="$1"
-  echo -e "\e[1;32m${message}\e[0m" # Bold Green  
+  echo -e "\e[1;32m$*\e[0m" # Bold Green  
 }
 
 function echo_step() {
-  local message="$1"
   local ARROW="\e[34m==>\e[0m" # Blue
-  echo -e "${ARROW} \e[1m${message}\e[0m" # Bold 
+  echo -e "${ARROW} \e[1m$*\e[0m" # Bold 
 }
 
 function detect_shell_rc_file() {
