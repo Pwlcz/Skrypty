@@ -8,3 +8,5 @@
 | VMs | Vagrant and Packer configs / scripts |
 | chinski-szajs | xrandr for semiuseless adapter |
 | aliases | it is what it is |
+| git-config | interactive quick git config |
+| copy-scripts.sh | copy scripts from this script dir to ~/bin |
