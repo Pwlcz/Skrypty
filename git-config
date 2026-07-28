@@ -101,18 +101,26 @@ function append_gpg_ssh_setup() {
   touch "$shellrc"
 
   if ! grep -Fq "$marker" "$shellrc" 2>/dev/null; then
-    cat >> "$shellrc" <<'EOF'
+    local tmp_shellrc
+    tmp_shellrc="$(mktemp)"
+    {
+      cat <<'EOF'
 # >>> git-config gpg ssh >>>
 unset SSH_AGENT_PID
 if [ "${gnupg_SSH_AUTH_SOCK_by:-0}" -ne $$ ]; then
   export SSH_AUTH_SOCK="$(gpgconf --list-dirs agent-ssh-socket)"
 fi
-if [[ -t 0 ]]; then
-  export GPG_TTY=$(tty)
-  gpg-connect-agent updatestartuptty /bye >/dev/null
-fi
+# this line should be before p10k sourcing
+export GPG_TTY=$TTY
+gpg-connect-agent updatestartuptty /bye >/dev/null
 # <<< git-config gpg ssh <<<
 EOF
+      if [[ -s "$shellrc" ]]; then
+        echo ''
+        cat "$shellrc"
+      fi
+    } > "$tmp_shellrc"
+    mv "$tmp_shellrc" "$shellrc"
   fi
 }
 
@@ -276,7 +284,7 @@ function main() {
     echo_ok "Configured GPG SSH support in $shellrc"
     echo ''
     echo_ok "=========================== public ssh key ==========================="
-    ssh-add -l
+    ssh-add -l || echo_error "restart terminal to apply user config"
     echo_ok "============================ (ssh-add -l) ============================"
   fi
   echo ''
