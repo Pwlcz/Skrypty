@@ -2,7 +2,7 @@
 # I wont remember to configure it (again).
 set -euo pipefail
 
-VERSION='0.0.1'
+VERSION='0.0.2'
 
 function help() {
   cat << EOF
@@ -163,7 +163,8 @@ function main() {
 
   # Commit signing configuration
   echo_step "Configure commit signing"
-  echo -n "Current Git global " && echo_ok "user.signingkey: $(git config --global user.signingkey)"
+  current_signkey=$(git config --global user.signingkey)
+  echo -n "Current Git global " && echo_ok "user.signingkey: $current_signkey"
   echo -n "Do you want to enable GPG commit signing? [Y/n]: "
   read -r enable_signing
   echo ''
@@ -210,11 +211,15 @@ function main() {
     done
 
     while true; do
-      echo -n "Enter the number of the key to use, or paste a key ID directly: "
+      echo -n "Enter the number of the key to use, or paste a key ID directly (Leave blank if already configured): "
       read -r gpg_key_id
       if [[ -z "$gpg_key_id" ]]; then
-        echo_error "No key selected. Please enter a valid selection."
-        continue
+        if [[ -n "$current_signkey" ]]; then
+          gpg_key_id="${current_signkey%!}"
+        else
+          echo_error "No key selected. Please enter a valid selection."
+          continue
+        fi
       fi
 
       normalized_key="${gpg_key_id,,}"
@@ -251,7 +256,12 @@ function main() {
     shellrc="$(detect_shell_rc_file)"
     append_gpg_ssh_setup "$shellrc"
     echo_ok "Configured GPG SSH support in $shellrc"
+    echo ''
+    echo_ok "=========================== public ssh key ==========================="
+    ssh-add -l
+    echo_ok "============================ (ssh-add -l) ============================"
   fi
+  echo ''
 
   # OS-Specific Line Ending Configuration (autocrlf)
   echo_step "Configuring autocrlf"
@@ -279,9 +289,9 @@ function main() {
   echo ''
 
   echo_ok "Git current global config:"
-  echo "----------------------------------------"
+  echo_ok "==========================================================="
   git --no-pager config --global --list
-  echo "----------------------------------------"
+  echo_ok "==========================================================="
 }
 
 main "$@"
