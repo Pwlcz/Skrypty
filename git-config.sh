@@ -2,8 +2,19 @@
 # I wont remember to configure it (again).
 set -euo pipefail
 
-#TODO: allow to do git-config.sh -v
-VERSION='0.0.0'
+VERSION='0.0.1'
+
+function help() {
+  cat << EOF
+Interactively set basic global git config. With optional setup for handling gpg.
+
+Usage: git-config.sh [Options]
+
+Options:
+  -h,   --help        display this message
+  -v,   --version     check script version
+EOF
+}
 
 function echo_error() {
   local message="$1"
@@ -21,148 +32,256 @@ function echo_step() {
   echo -e "${ARROW} \e[1m${message}\e[0m" # Bold 
 }
 
-# User Details
-echo_step "Configure user identity"
-echo -n "Current Git global " && echo_ok "user.name: $(git config --global user.name)" 
-echo -n "Enter your Full Name for Git (e.g., John Doe, Leave empty for no changes): "
-read -r git_name
-if [[ -n "$git_name" ]]; then
-  git config --global user.name "$git_name"
-fi
-echo ''
+function detect_shell_rc_file() {
+  local shell_name=""
+  local parent_shell=""
 
-echo -n "Current Git global " && echo_ok "user.email: $(git config --global user.email)"
-echo -n "Enter your Email for Git (e.g., john@example.com, Leave empty for no changes): "
-read -r git_email
-if [[ -n "$git_email" ]]; then
-  git config --global user.email "$git_email"
-fi
-echo ''
+  if [[ -n "${SHELL:-}" ]]; then
+    shell_name="$(basename "$SHELL")"
+  fi
 
-echo_ok "User identity set"
-echo "Global user.name: $(git config --global user.name)"
-echo "Global user.email: $(git config --global user.email)"
-echo ''
+  # like that will ever happen
+  if [[ -z "$shell_name" ]]; then
+    parent_shell="$(ps -p "${PPID:-$$}" -o comm= 2>/dev/null | tr -d '[:space:]')"
+    shell_name="$(basename "$parent_shell")"
+  fi
 
-# default init branch
-echo_step "Configure default init branch"
-echo -n "Current Git global " && echo_ok "init.defaultBranch: $(git config --global init.defaultBranch)"
-echo -n "Enter preffered initial default branch name (e.g., main, Leave empty for no changes): "
-read -r git_defaultbranch
-if [[ -n "$git_defaultbranch" ]]; then
-  git config --global init.defaultBranch "$git_defaultbranch"
-fi
-echo_ok "Default branch set to \"$(git config --global init.defaultBranch)\"."
-echo ''
-
-# Commit signing configuration
-echo_step "Configure commit signing"
-echo -n "Current Git global " && echo_ok "user.signingkey: $(git config --global user.signingkey)"
-echo -n "Do you want to enable GPG commit signing? [y/N]: "
-read -r enable_signing
-echo ''
-if [[ "$enable_signing" == [yY] ]]; then
-  # TODO: cleanup this mess
-  echo "List of available GPG keys:"
-  gpg --list-secret-keys 2>/dev/null
-
-  declare -A valid_gpg_keys=()
-  declare -A key_fingerprints=()
-  gpg_keys=()
-  sec_seen=false
-
-  while IFS= read -r line; do
-    if [[ "$line" =~ ^sec[[:space:]] ]]; then
-      sec_seen=true
-      continue
-    fi
-
-    if [[ "$sec_seen" == true ]]; then
-      if [[ "$line" =~ ^[[:space:]]+([0-9A-Fa-f]{16,40})[[:space:]]*$ ]]; then
-        fingerprint="${BASH_REMATCH[1]}"
-        short_key="${fingerprint: -16}"
-        gpg_keys+=("$short_key")
-        key_fingerprints["${short_key,,}"]="$fingerprint"
-        key_fingerprints["${fingerprint,,}"]="$fingerprint"
-        valid_gpg_keys["${short_key,,}"]=1
-        valid_gpg_keys["${fingerprint,,}"]=1
-        sec_seen=false
+  case "$shell_name" in
+    zsh)
+      echo "$HOME/.zshrc"
+      ;;
+    bash)
+      echo "$HOME/.bashrc"
+      ;;
+    fish)
+      echo "$HOME/.config/fish/config.fish"
+      ;;
+    *)
+      if [[ -f "$HOME/.zshrc" ]]; then
+        echo "$HOME/.zshrc"
+      else
+        echo "$HOME/.bashrc"
       fi
-    fi
-  done < <(gpg --list-secret-keys 2>/dev/null)
+      ;;
+  esac
+}
 
-  if [[ ${#gpg_keys[@]} -eq 0 ]]; then
-    echo "No GPG secret keys found. Please generate one with 'gpg --full-generate-key' and rerun this script."
+function append_gpg_ssh_setup() {
+  local shellrc="$1"
+  local marker="# >>> git-config.sh gpg ssh >>>"
+
+  mkdir -p "$HOME/.gnupg"
+  if ! grep -Fq "enable-ssh-support" "$HOME/.gnupg/gpg-agent.conf" 2>/dev/null; then
+    echo "enable-ssh-support" >> "$HOME/.gnupg/gpg-agent.conf"
+    gpgconf --kill gpg-agent
+  fi
+
+  if [[ -z "$shellrc" ]]; then
+    echo_error "Could not determine shell startup file."
+    return 1
+  fi
+
+  mkdir -p "$(dirname "$shellrc")"
+  touch "$shellrc"
+
+  if ! grep -Fq "$marker" "$shellrc" 2>/dev/null; then
+    cat >> "$shellrc" <<'EOF'
+# >>> git-config.sh gpg ssh >>>
+unset SSH_AGENT_PID
+if [ "${gnupg_SSH_AUTH_SOCK_by:-0}" -ne $$ ]; then
+  export SSH_AUTH_SOCK="$(gpgconf --list-dirs agent-ssh-socket)"
+fi
+export GPG_TTY=$(tty)
+gpg-connect-agent updatestartuptty /bye >/dev/null
+# <<< git-config.sh gpg ssh <<<
+EOF
+  fi
+}
+
+function main() {
+  if ! PARSED_ARGS=$(getopt --name git-config --options hv \
+        --longoptions help,version -- "$@"); then
+    help >&2
     exit 1
   fi
-
-  for i in "${!gpg_keys[@]}"; do
-    printf "%d) %s\n" $((i + 1)) "${gpg_keys[i]}"
-  done
-
+  eval set -- "${PARSED_ARGS}"
+  
   while true; do
-  echo -n "Enter the number of the key to use, or paste a key ID directly: "
-  read -r gpg_key_id
-  if [[ -z "$gpg_key_id" ]]; then
-    echo_error "No key selected. Please enter a valid selection."
-    continue
-  fi
-
-  normalized_key="${gpg_key_id,,}"
-
-  if [[ "$gpg_key_id" =~ ^[0-9]+$ ]]; then
-    if (( gpg_key_id >= 1 && gpg_key_id <= ${#gpg_keys[@]} )); then
-      selected_short_key="${gpg_keys[gpg_key_id-1]}"
-      gpg_key_id="${key_fingerprints[${selected_short_key,,}]}"
-      break
-    fi
-    echo_error "Selection out of range. Please choose a valid number."
-    continue
-  fi
-
-  if [[ -n "${valid_gpg_keys[$normalized_key]+x}" ]]; then
-    gpg_key_id="${key_fingerprints[$normalized_key]}"
-    break
-  fi
-
-  echo_error "Invalid key selection. Please enter a number from the list or one of the available short IDs/fingerprints."
+    case "$1" in 
+      -h | --help)
+        help
+        exit 0
+        ;;
+      -v | --version)
+        echo "${VERSION}"
+        exit 0
+        ;;
+      --)
+        shift
+        break
+        ;;
+      *)
+        echo "Unrecognized option: $1"
+        shift
+        ;;
+    esac
   done
 
-  git config --global user.signingkey "${gpg_key_id}!"
-  git config --global commit.gpgsign true
-  echo_ok "GPG commit signing enabled with key ID: $gpg_key_id"
-else
-  git config --global commit.gpgsign false
-  echo_ok "GPG commit signing disabled."
-fi
-echo ''
+  # User Details
+  echo_step "Configure user identity"
+  echo -n "Current Git global " && echo_ok "user.name: $(git config --global user.name)" 
+  echo -n "Enter your Full Name for Git (e.g., John Doe, Leave empty for no changes): "
+  read -r git_name
+  if [[ -n "$git_name" ]]; then
+    git config --global user.name "$git_name"
+  fi
+  echo ''
 
-# OS-Specific Line Ending Configuration (autocrlf)
-echo_step "Configuring autocrlf"
-if [[ "$OSTYPE" == "linux-gnu"* ]] || [[ "$OSTYPE" == "darwin"* ]]; then
-  # Linux / macOS
-  git config --global core.autocrlf input
-  echo "Line endings (autocrlf) configured for Unix (input)."
-elif [[ "$OSTYPE" == "msys" ]] || [[ "$OSTYPE" == "cygwin" ]] || [[ "$OSTYPE" == "win32" ]]; then
-  # Windows (Git Bash)
-  git config --global core.autocrlf true
-  echo "Line endings (autocrlf) configured for Windows (true)."
-else
-  echo "OS not definitively recognized. Skipping autocrlf configuration."
-fi
-echo ''
+  echo -n "Current Git global " && echo_ok "user.email: $(git config --global user.email)"
+  echo -n "Enter your Email for Git (e.g., john@example.com, Leave empty for no changes): "
+  read -r git_email
+  if [[ -n "$git_email" ]]; then
+    git config --global user.email "$git_email"
+  fi
+  echo ''
 
-echo_step "Turning off default pager"
-git config --global core.pager ''
-echo ''
+  echo_ok "User identity set"
+  echo "Global user.name: $(git config --global user.name)"
+  echo "Global user.email: $(git config --global user.email)"
+  echo ''
 
-# Set simple push/pull behavior
-echo_step "Configuring simple Push/Pull behaviors"
-git config --global push.default simple
-git config --global pull.rebase false
-echo ''
+  # default init branch
+  echo_step "Configure default init branch"
+  echo -n "Current Git global " && echo_ok "init.defaultBranch: $(git config --global init.defaultBranch)"
+  echo -n "Enter preffered initial default branch name (e.g., main, Leave empty for no changes): "
+  read -r git_defaultbranch
+  if [[ -n "$git_defaultbranch" ]]; then
+    git config --global init.defaultBranch "$git_defaultbranch"
+  fi
+  echo_ok "Default branch set to \"$(git config --global init.defaultBranch)\"."
+  echo ''
 
-echo_ok "Git current global config:"
-echo "----------------------------------------"
-git --no-pager config --global --list
-echo "----------------------------------------"
+  # Commit signing configuration
+  echo_step "Configure commit signing"
+  echo -n "Current Git global " && echo_ok "user.signingkey: $(git config --global user.signingkey)"
+  echo -n "Do you want to enable GPG commit signing? [Y/n]: "
+  read -r enable_signing
+  echo ''
+  if [[ "$enable_signing" == [nN] ]]; then
+    git config --global commit.gpgsign false
+    echo_ok "GPG commit signing disabled."
+  else
+    echo "List of available GPG keys:"
+    gpg --list-secret-keys 2>/dev/null
+
+    declare -A valid_gpg_keys=()
+    declare -A key_fingerprints=()
+    gpg_keys=()
+    sec_seen=false
+
+    while IFS= read -r line; do
+      # GnuPG uses `sec>` for smartcard-backed stubs and `sec ` for normal keys.
+      if [[ "$line" =~ ^sec([[:space:]>]) ]]; then
+        sec_seen=true
+        continue
+      fi
+
+      if [[ "$sec_seen" == true ]]; then
+        if [[ "$line" =~ ^[[:space:]]+([0-9A-Fa-f]{16,40})[[:space:]]*$ ]]; then
+          fingerprint="${BASH_REMATCH[1]}"
+          short_key="${fingerprint: -16}"
+          gpg_keys+=("$short_key")
+          key_fingerprints["${short_key,,}"]="$fingerprint"
+          key_fingerprints["${fingerprint,,}"]="$fingerprint"
+          valid_gpg_keys["${short_key,,}"]=1
+          valid_gpg_keys["${fingerprint,,}"]=1
+          sec_seen=false
+        fi
+      fi
+    done < <(gpg --list-secret-keys 2>/dev/null)
+
+    if [[ ${#gpg_keys[@]} -eq 0 ]]; then
+      echo "No GPG secret keys found. Please generate one with 'gpg --full-generate-key' and rerun this script."
+      exit 1
+    fi
+
+    for i in "${!gpg_keys[@]}"; do
+      printf "%d) %s\n" $((i + 1)) "${gpg_keys[i]}"
+    done
+
+    while true; do
+      echo -n "Enter the number of the key to use, or paste a key ID directly: "
+      read -r gpg_key_id
+      if [[ -z "$gpg_key_id" ]]; then
+        echo_error "No key selected. Please enter a valid selection."
+        continue
+      fi
+
+      normalized_key="${gpg_key_id,,}"
+
+      if [[ "$gpg_key_id" =~ ^[0-9]+$ ]]; then
+        if (( gpg_key_id >= 1 && gpg_key_id <= ${#gpg_keys[@]} )); then
+          selected_short_key="${gpg_keys[gpg_key_id-1]}"
+          gpg_key_id="${key_fingerprints[${selected_short_key,,}]}"
+          break
+        fi
+        echo_error "Selection out of range. Please choose a valid number."
+        continue
+      fi
+
+      if [[ -n "${valid_gpg_keys[$normalized_key]+x}" ]]; then
+        gpg_key_id="${key_fingerprints[$normalized_key]}"
+        break
+      fi
+
+      echo_error "Invalid key selection. Please enter a number from the list or one of the available short IDs/fingerprints."
+    done
+
+    git config --global user.signingkey "${gpg_key_id}!"
+    git config --global commit.gpgsign true
+    echo_ok "GPG commit signing enabled with key ID: $gpg_key_id"
+  fi
+  echo ''
+
+  # Use gpg key for ssh
+  echo_step "Change ssh agent socket"
+  echo -n 'Do you want to use gpg key for ssh? [Y/n]: '
+  read -r gpg4ssh
+  if [[ "$gpg4ssh" != [nN] ]]; then
+    shellrc="$(detect_shell_rc_file)"
+    append_gpg_ssh_setup "$shellrc"
+    echo_ok "Configured GPG SSH support in $shellrc"
+  fi
+
+  # OS-Specific Line Ending Configuration (autocrlf)
+  echo_step "Configuring autocrlf"
+  if [[ "$OSTYPE" == "linux-gnu"* ]] || [[ "$OSTYPE" == "darwin"* ]]; then
+    # Linux / macOS
+    git config --global core.autocrlf input
+    echo "Line endings (autocrlf) configured for Unix (input)."
+  elif [[ "$OSTYPE" == "msys" ]] || [[ "$OSTYPE" == "cygwin" ]] || [[ "$OSTYPE" == "win32" ]]; then
+    # Windows (Git Bash)
+    git config --global core.autocrlf true
+    echo "Line endings (autocrlf) configured for Windows (true)."
+  else
+    echo "OS not definitively recognized. Skipping autocrlf configuration."
+  fi
+  echo ''
+
+  echo_step "Turning off default pager"
+  git config --global core.pager ''
+  echo ''
+
+  # Set simple push/pull behavior
+  echo_step "Configuring simple Push/Pull behaviors"
+  git config --global push.default simple
+  git config --global pull.rebase false
+  echo ''
+
+  echo_ok "Git current global config:"
+  echo "----------------------------------------"
+  git --no-pager config --global --list
+  echo "----------------------------------------"
+}
+
+main "$@"
