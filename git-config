@@ -2,7 +2,7 @@
 # I wont remember to configure it (again).
 set -euo pipefail
 
-VERSION='0.0.2'
+VERSION='0.0.3'
 
 function help() {
   cat << EOF
@@ -69,12 +69,31 @@ function detect_shell_rc_file() {
 function append_gpg_ssh_setup() {
   local shellrc="$1"
   local marker="# >>> git-config gpg ssh >>>"
+  local agent_conf="$HOME/.gnupg/gpg-agent.conf"
 
   mkdir -p "$HOME/.gnupg"
-  if ! grep -Fq "enable-ssh-support" "$HOME/.gnupg/gpg-agent.conf" 2>/dev/null; then
-    echo "enable-ssh-support" >> "$HOME/.gnupg/gpg-agent.conf"
-    gpgconf --kill gpg-agent
+  if ! grep -Fq "enable-ssh-support" "$agent_conf" 2>/dev/null; then
+    echo "enable-ssh-support" >> "$agent_conf"
   fi
+
+  # Force terminal pinentry (no GUI popup)
+  if ! grep -q "^pinentry-program" "$agent_conf" 2>/dev/null; then
+    local pinentry_path
+    if command -v pinentry-tty >/dev/null 2>&1; then
+      pinentry_path=$(command -v pinentry-tty)
+    elif command -v pinentry-curses >/dev/null 2>&1; then
+      pinentry_path=$(command -v pinentry-curses)
+    fi
+
+    if [[ -n "${pinentry_path:-}" ]]; then
+      echo "pinentry-program $pinentry_path" >> "$agent_conf"
+    else
+      echo_error "Could not find pinentry-tty or pinentry-curses. Install it via your package manager for in-terminal prompts."
+    fi
+  fi
+  
+  #Force restart
+  gpgconf --kill gpg-agent
 
   if [[ -z "$shellrc" ]]; then
     echo_error "Could not determine shell startup file."
@@ -91,8 +110,10 @@ unset SSH_AGENT_PID
 if [ "${gnupg_SSH_AUTH_SOCK_by:-0}" -ne $$ ]; then
   export SSH_AUTH_SOCK="$(gpgconf --list-dirs agent-ssh-socket)"
 fi
-export GPG_TTY=$(tty)
-gpg-connect-agent updatestartuptty /bye >/dev/null
+if [[ -t 0 ]]; then
+  export GPG_TTY=$(tty)
+  gpg-connect-agent updatestartuptty /bye >/dev/null
+fi
 # <<< git-config gpg ssh <<<
 EOF
   fi
