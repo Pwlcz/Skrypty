@@ -84,23 +84,23 @@ check_script_version() {
   local dst="$2"
   local name
   name="$(basename "$src")"
-  local src_version=""
-  local dst_version=""
+  local src_hash=""
+  local dst_hash=""
 
-  if "$src" -v >/dev/null 2>&1; then
-    src_version="$($src -v 2>/dev/null || true)"
+  if [[ -f "$src" ]]; then
+    src_hash="$(sha1sum "$src" 2>/dev/null | awk '{print $1}' || true)"
   fi
 
-  if [[ -x "$dst" ]] && "$dst" -v >/dev/null 2>&1; then
-    dst_version="$($dst -v 2>/dev/null || true)"
+  if [[ -f "$dst" ]]; then
+    dst_hash="$(sha1sum "$dst" 2>/dev/null | awk '{print $1}' || true)"
   fi
 
-  if [[ -z "$src_version" || -z "$dst_version" ]]; then
+  if [[ -z "$src_hash" || -z "$dst_hash" ]]; then
     echo "SKIP $name"
     return 0
   fi
 
-  if [[ "$src_version" == "$dst_version" ]]; then
+  if [[ "$src_hash" == "$dst_hash" ]]; then
     echo "OK   $name"
     return 0
   fi
