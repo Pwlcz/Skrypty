@@ -2,11 +2,18 @@
 # I wont remember to configure it (again).
 set -euo pipefail
 
-VERSION='0.0.3'
+VERSION='0.0.4'
 
 function help() {
   cat << EOF
 Interactively set basic global git config. With optional setup for handling gpg.
+
+Minor problems troubleshoot:
+-- If you have Kleopatra installed, Settings → Configure Kleopatra → GnuPG System → (look for logging/debug). Set log level to none and clear the file path (https://bbs.archlinux.org/viewtopic.php?id=296399)
+
+-- Copy pinentry-wrapper script to avoid popups when working in terminal.
+
+-- Check $HOME/.gnupg/gpg-agent.conf for possible issues
 
 Usage: git-config [Options]
 
@@ -76,17 +83,48 @@ function append_gpg_ssh_setup() {
   # Force terminal pinentry (no GUI popup)
   if ! grep -q "^pinentry-program" "$agent_conf" 2>/dev/null; then
     local pinentry_path
-    if command -v pinentry-tty >/dev/null 2>&1; then
-      pinentry_path=$(command -v pinentry-tty)
-    elif command -v pinentry-curses >/dev/null 2>&1; then
-      pinentry_path=$(command -v pinentry-curses)
+    if command -v pinentry-wrapper >/dev/null 2>&1; then
+      pinentry_path=$(command -v pinentry-wrapper)
     fi
 
     if [[ -n "${pinentry_path:-}" ]]; then
       echo "pinentry-program $pinentry_path" >> "$agent_conf"
     else
-      echo_error "Could not find pinentry-tty or pinentry-curses. Install it via your package manager for in-terminal prompts."
+      echo_error "Could not find pinentry-wrapper. The default password popup window will ALWAYS appear."
+      read -rp "Do you want to create the simple wrapper now? [Y/n]: " create_wrapper
+      if [[ $create_wrapper != [Nn] ]]; then
+        pinentry_path="$HOME/bin/pinentry-wrapper"
+        mkdir -p "$(dirname "${pinentry_path}")"
+        cat > "$pinentry_path" << 'EOF'
+#!/bin/bash
+
+# If the terminal explicitly told us to use a TTY, use the console pinentry
+# Change sequence if you prefer the other one
+if [ "$PINENTRY_USER_DATA" = "USE_TTY" ]; then
+    if command -v pinentry-curses >/dev/null 2>&1; then
+        exec pinentry-curses "$@"
+    elif command -v pinentry-tty >/dev/null 2>&1; then
+        exec pinentry-tty "$@"
     fi
+fi
+
+# Fallback for Kleopatra and desktop environments (no terminal attached)
+if command -v pinentry-qt >/dev/null 2>&1; then
+    exec pinentry-qt "$@"
+elif command -v pinentry-gnome3 >/dev/null 2>&1; then
+    exec pinentry-gnome3 "$@"
+else
+    # System default GUI if specific ones aren't found
+    exec pinentry "$@"
+fi
+EOF
+      chmod +x "$pinentry_path"
+      echo "pinentry-program $pinentry_path" >> "$agent_conf"
+      echo_ok "Created wrapper in $pinentry_path"
+      fi
+    fi
+  else
+    echo "Make sure pinentry-program in $agent_conf is the one you want!"
   fi
   
   #Force restart
@@ -110,9 +148,18 @@ unset SSH_AGENT_PID
 if [ "${gnupg_SSH_AUTH_SOCK_by:-0}" -ne $$ ]; then
   export SSH_AUTH_SOCK="$(gpgconf --list-dirs agent-ssh-socket)"
 fi
-# this line should be before p10k sourcing
-export GPG_TTY=$TTY
-gpg-connect-agent updatestartuptty /bye >/dev/null
+
+# Update the TTY and tell the pinentry-wrapper to use the console prompt
+_CUR_TTY=$(tty 2>/dev/null)
+case "$_CUR_TTY" in
+  /dev/*)
+    # this line should be before p10k sourcing (if present)
+    export GPG_TTY="$_CUR_TTY"
+    export PINENTRY_USER_DATA="USE_TTY"
+    gpg-connect-agent updatestartuptty /bye &>/dev/null
+    ;;
+esac
+unset _CUR_TTY
 # <<< git-config gpg ssh <<<
 EOF
       if [[ -s "$shellrc" ]]; then
@@ -284,7 +331,7 @@ function main() {
     echo_ok "Configured GPG SSH support in $shellrc"
     echo ''
     echo_ok "=========================== public ssh key ==========================="
-    ssh-add -l || echo_error "restart terminal to apply user config"
+    ssh-add -l || echo_error "restart terminal to apply user config and run: $ ssh-add -l or this script again"
     echo_ok "============================ (ssh-add -l) ============================"
   fi
   echo ''
