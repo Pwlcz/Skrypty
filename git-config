@@ -2,11 +2,18 @@
 # I wont remember to configure it (again).
 set -euo pipefail
 
-VERSION='0.0.4'
+VERSION='0.1.0'
 
 function help() {
   cat << EOF
 Interactively set basic global git config. With optional setup for handling gpg.
+
+Usage: git-config [Options]
+
+Options:
+  -h,   --help        display this message
+  -v,   --version     check script version
+  -k,   --pub-key     alias to ssh-add -l
 
 Minor problems troubleshoot:
 -- If you have Kleopatra installed, Settings → Configure Kleopatra → GnuPG System → (look for logging/debug). Set log level to none and clear the file path (https://bbs.archlinux.org/viewtopic.php?id=296399)
@@ -14,12 +21,6 @@ Minor problems troubleshoot:
 -- Copy pinentry-wrapper script to avoid popups when working in terminal.
 
 -- Check $HOME/.gnupg/gpg-agent.conf for possible issues
-
-Usage: git-config [Options]
-
-Options:
-  -h,   --help        display this message
-  -v,   --version     check script version
 EOF
 }
 
@@ -83,7 +84,7 @@ function append_gpg_ssh_setup() {
   # Force terminal pinentry (no GUI popup)
   if ! grep -q "^pinentry-program" "$agent_conf" 2>/dev/null; then
     local pinentry_path
-    if command -v pinentry-wrapper >/dev/null 2>&1; then
+    if command -v pinentry-wrapper &>/dev/null; then
       pinentry_path=$(command -v pinentry-wrapper)
     fi
 
@@ -101,17 +102,17 @@ function append_gpg_ssh_setup() {
 # If the terminal explicitly told us to use a TTY, use the console pinentry
 # Change sequence if you prefer the other one
 if [ "$PINENTRY_USER_DATA" = "USE_TTY" ]; then
-    if command -v pinentry-curses >/dev/null 2>&1; then
+    if command -v pinentry-curses &>/dev/null; then
         exec pinentry-curses "$@"
-    elif command -v pinentry-tty >/dev/null 2>&1; then
+    elif command -v pinentry-tty &>/dev/null; then
         exec pinentry-tty "$@"
     fi
 fi
 
 # Fallback for Kleopatra and desktop environments (no terminal attached)
-if command -v pinentry-qt >/dev/null 2>&1; then
+if command -v pinentry-qt &>/dev/null; then
     exec pinentry-qt "$@"
-elif command -v pinentry-gnome3 >/dev/null 2>&1; then
+elif command -v pinentry-gnome3 &>/dev/null; then
     exec pinentry-gnome3 "$@"
 else
     # System default GUI if specific ones aren't found
@@ -167,13 +168,14 @@ EOF
         cat "$shellrc"
       fi
     } > "$tmp_shellrc"
+    mv "$shellrc" "${shellrc}.old" && echo "Previous $shellrc saved to ${shellrc}.old" 
     mv "$tmp_shellrc" "$shellrc"
   fi
 }
 
 function main() {
-  if ! PARSED_ARGS=$(getopt --name git-config --options hv \
-        --longoptions help,version -- "$@"); then
+  if ! PARSED_ARGS=$(getopt --name git-config --options hvk \
+        --longoptions help,version,pub-key -- "$@"); then
     help >&2
     exit 1
   fi
@@ -187,6 +189,10 @@ function main() {
         ;;
       -v | --version)
         echo "${VERSION}"
+        exit 0
+        ;;
+      -k | --pub-key)
+        ssh-add -l
         exit 0
         ;;
       --)
@@ -203,16 +209,14 @@ function main() {
   # User Details
   echo_step "Configure user identity"
   echo -n "Current Git global " && echo_ok "user.name: $(git config --global user.name)" 
-  echo -n "Enter your Full Name for Git (e.g., John Doe, Leave empty for no changes): "
-  read -r git_name
+  read -rp "Enter your Full Name for Git (e.g., John Doe, Leave empty for no changes): " git_name
   if [[ -n "$git_name" ]]; then
     git config --global user.name "$git_name"
   fi
   echo ''
 
   echo -n "Current Git global " && echo_ok "user.email: $(git config --global user.email)"
-  echo -n "Enter your Email for Git (e.g., john@example.com, Leave empty for no changes): "
-  read -r git_email
+  read -rp "Enter your Email for Git (e.g., john@example.com, Leave empty for no changes): " git_email
   if [[ -n "$git_email" ]]; then
     git config --global user.email "$git_email"
   fi
@@ -226,8 +230,7 @@ function main() {
   # default init branch
   echo_step "Configure default init branch"
   echo -n "Current Git global " && echo_ok "init.defaultBranch: $(git config --global init.defaultBranch)"
-  echo -n "Enter preffered initial default branch name (e.g., main, Leave empty for no changes): "
-  read -r git_defaultbranch
+  read -rp "Enter preffered initial default branch name (e.g., main, Leave empty for no changes): " git_defaultbranch
   if [[ -n "$git_defaultbranch" ]]; then
     git config --global init.defaultBranch "$git_defaultbranch"
   fi
@@ -238,8 +241,7 @@ function main() {
   echo_step "Configure commit signing"
   current_signkey=$(git config --global user.signingkey)
   echo -n "Current Git global " && echo_ok "user.signingkey: $current_signkey"
-  echo -n "Do you want to enable GPG commit signing? [Y/n]: "
-  read -r enable_signing
+  read -rp "Do you want to enable GPG commit signing? [Y/n]: " enable_signing
   echo ''
   if [[ "$enable_signing" == [nN] ]]; then
     git config --global commit.gpgsign false
@@ -284,8 +286,7 @@ function main() {
     done
 
     while true; do
-      echo -n "Enter the number of the key to use, or paste a key ID directly (Leave blank if already configured): "
-      read -r gpg_key_id
+      read -rp "Enter the number of the key to use, or paste a key ID directly (Leave blank if already configured): " gpg_key_id
       if [[ -z "$gpg_key_id" ]]; then
         if [[ -n "$current_signkey" ]]; then
           gpg_key_id="${current_signkey%!}"
@@ -323,16 +324,16 @@ function main() {
 
   # Use gpg key for ssh
   echo_step "Change ssh agent socket"
-  echo -n 'Do you want to use gpg key for ssh? [Y/n]: '
-  read -r gpg4ssh
+  read -rp 'Do you want to use gpg key for ssh? [Y/n]: ' gpg4ssh
   if [[ "$gpg4ssh" != [nN] ]]; then
     shellrc="$(detect_shell_rc_file)"
     append_gpg_ssh_setup "$shellrc"
     echo_ok "Configured GPG SSH support in $shellrc"
     echo ''
-    echo_ok "=========================== public ssh key ==========================="
+    echo_ok "================================= public ssh key ================================="
+    export SSH_AUTH_SOCK="$(gpgconf --list-dirs agent-ssh-socket)"
     ssh-add -l || echo_error "restart terminal to apply user config and run: $ ssh-add -l or this script again"
-    echo_ok "============================ (ssh-add -l) ============================"
+    echo_ok "================== (ssh-add -l) RESTART TERMINAL TO TAKE EFFECT =================="
   fi
   echo ''
 

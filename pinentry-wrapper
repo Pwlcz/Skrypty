@@ -4,17 +4,17 @@
 # If the terminal explicitly told us to use a TTY, use the console pinentry
 # Change sequence if you prefer the other one
 if [ "$PINENTRY_USER_DATA" = "USE_TTY" ]; then
-    if command -v pinentry-curses >/dev/null 2>&1; then
+    if command -v pinentry-curses &>/dev/null; then
         exec pinentry-curses "$@"
-    elif command -v pinentry-tty >/dev/null 2>&1; then
+    elif command -v pinentry-tty &>/dev/null; then
         exec pinentry-tty "$@"
     fi
 fi
 
 # Fallback for Kleopatra and desktop environments (no terminal attached)
-if command -v pinentry-qt >/dev/null 2>&1; then
+if command -v pinentry-qt &>/dev/null; then
     exec pinentry-qt "$@"
-elif command -v pinentry-gnome3 >/dev/null 2>&1; then
+elif command -v pinentry-gnome3 &>/dev/null; then
     exec pinentry-gnome3 "$@"
 else
     # System default GUI if specific ones aren't found
