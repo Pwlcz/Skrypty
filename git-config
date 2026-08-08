@@ -2,11 +2,11 @@
 # I wont remember to configure it (again).
 set -euo pipefail
 
-VERSION='0.1.0'
+VERSION='0.1.1'
 
 function help() {
   cat << EOF
-Interactively set basic global git config. With optional setup for handling gpg.
+Interactively set basic git local or global config. With optional setup for handling gpg.
 
 Usage: git-config [Options]
 
@@ -14,6 +14,7 @@ Options:
   -h,   --help        display this message
   -v,   --version     check script version
   -k,   --pub-key     alias to ssh-add -l
+  -g,   --global      configure global settings
 
 Minor problems troubleshoot:
 -- If you have Kleopatra installed, Settings → Configure Kleopatra → GnuPG System → (look for logging/debug). Set log level to none and clear the file path (https://bbs.archlinux.org/viewtopic.php?id=296399)
@@ -174,8 +175,12 @@ EOF
 }
 
 function main() {
-  if ! PARSED_ARGS=$(getopt --name git-config --options hvk \
-        --longoptions help,version,pub-key -- "$@"); then
+  repo_dir=$(git rev-parse --is-inside-work-tree 2>/dev/null || echo '')
+  config_file_flag="--local"
+  config_file="Local"
+
+  if ! PARSED_ARGS=$(getopt --name git-config --options hvkg \
+        --longoptions help,version,pub-key,global -- "$@"); then
     help >&2
     exit 1
   fi
@@ -194,6 +199,11 @@ function main() {
       -k | --pub-key)
         ssh-add -l
         exit 0
+	      ;;
+      -g | --global)
+        config_file_flag="--global"
+        config_file="Global"
+        break
         ;;
       --)
         shift
@@ -206,45 +216,55 @@ function main() {
     esac
   done
 
+  if [[ -z "${repo_dir}" && "$config_file_flag" == "--local" ]]; then
+    read -rp "Not in a git repository. Do you want to configure Global settings? [Y/n]: " config_global
+    if [[ "$config_global" != [nN] ]]; then
+      config_file_flag="--global"
+      config_file="Global"
+    else
+      exit 0
+    fi
+  fi
+
   # User Details
   echo_step "Configure user identity"
-  echo -n "Current Git global " && echo_ok "user.name: $(git config --global user.name)" 
+  echo -n "Current Git $config_file " && echo_ok "user.name: $(git config user.name)" 
   read -rp "Enter your Full Name for Git (e.g., John Doe, Leave empty for no changes): " git_name
   if [[ -n "$git_name" ]]; then
-    git config --global user.name "$git_name"
+    git config "$config_file_flag" user.name "$git_name"
   fi
   echo ''
 
-  echo -n "Current Git global " && echo_ok "user.email: $(git config --global user.email)"
+  echo -n "Current Git $config_file " && echo_ok "user.email: $(git config user.email)"
   read -rp "Enter your Email for Git (e.g., john@example.com, Leave empty for no changes): " git_email
   if [[ -n "$git_email" ]]; then
-    git config --global user.email "$git_email"
+    git config "$config_file_flag" user.email "$git_email"
   fi
   echo ''
 
   echo_ok "User identity set"
-  echo "Global user.name: $(git config --global user.name)"
-  echo "Global user.email: $(git config --global user.email)"
+  echo "$config_file user.name: $(git config user.name)"
+  echo "$config_file user.email: $(git config user.email)"
   echo ''
 
   # default init branch
   echo_step "Configure default init branch"
-  echo -n "Current Git global " && echo_ok "init.defaultBranch: $(git config --global init.defaultBranch)"
+  echo -n "Current Git $config_file " && echo_ok "init.defaultBranch: $(git config init.defaultBranch)"
   read -rp "Enter preffered initial default branch name (e.g., main, Leave empty for no changes): " git_defaultbranch
   if [[ -n "$git_defaultbranch" ]]; then
-    git config --global init.defaultBranch "$git_defaultbranch"
+    git config "$config_file_flag" init.defaultBranch "$git_defaultbranch"
   fi
-  echo_ok "Default branch set to \"$(git config --global init.defaultBranch)\"."
+  echo_ok "Default $config_file branch set to \"$(git config init.defaultBranch)\"."
   echo ''
 
   # Commit signing configuration
   echo_step "Configure commit signing"
-  current_signkey=$(git config --global user.signingkey)
-  echo -n "Current Git global " && echo_ok "user.signingkey: $current_signkey"
+  current_signkey=$(git config user.signingkey)
+  echo -n "Current Git $config_file " && echo_ok "user.signingkey: $current_signkey"
   read -rp "Do you want to enable GPG commit signing? [Y/n]: " enable_signing
   echo ''
   if [[ "$enable_signing" == [nN] ]]; then
-    git config --global commit.gpgsign false
+    git config "$config_file_flag" commit.gpgsign false
     echo_ok "GPG commit signing disabled."
   else
     echo "List of available GPG keys:"
@@ -316,8 +336,8 @@ function main() {
       echo_error "Invalid key selection. Please enter a number from the list or one of the available short IDs/fingerprints."
     done
 
-    git config --global user.signingkey "${gpg_key_id}!"
-    git config --global commit.gpgsign true
+    git config "$config_file_flag" user.signingkey "${gpg_key_id}!"
+    git config "$config_file_flag" commit.gpgsign true
     echo_ok "GPG commit signing enabled with key ID: $gpg_key_id"
   fi
   echo ''
@@ -362,9 +382,9 @@ function main() {
   git config --global pull.rebase false
   echo ''
 
-  echo_ok "Git current global config:"
+  echo_ok "Git current settings:"
   echo_ok "==========================================================="
-  git --no-pager config --global --list
+  git --no-pager config --list
   echo_ok "==========================================================="
 }
 
