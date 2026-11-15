@@ -15,3 +15,14 @@ function gitignore-latex() {
 *.lof
 # End of LaTeX files' >> .gitignore
 }
+
+function pyvenv() {
+  if [[ ! -d ./.venv ]]; then
+    printf '%s' 'dir .venv not found. Do you want to create it now? [Y/n] '
+    read -r c
+    if [[ $c == [yY] ]] || [[ -z $c ]]; then 
+      python -m venv .venv
+    fi
+  fi
+  source ./.venv/bin/activate
+}

@@ -11,3 +11,6 @@
 | git-config | interactive quick git config |
 | pinentry-wrapper | basic wrapper for pinentry to avoid unnecessary popups |
 | copy-scripts.sh | copy scripts from this script dir to ~/bin |
+| pgn2latex | convert a PGN game to an animated LaTeX chessboard |
+
+Python scripts packaged with `pyinstaller --onefile --name xyz script.py`

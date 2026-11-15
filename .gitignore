@@ -3,3 +3,18 @@
 test*
 .*
 output/
+*.spec
+tmp/
+build/
+# LaTeX files
+*.bat
+*.gz
+*.aux
+*.log
+*.bbl
+*.blg
+*.lot
+*.tcp
+*.toc
+*.lof
+# End of LaTeX files

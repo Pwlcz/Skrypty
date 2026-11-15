@@ -2,18 +2,18 @@
 # Yes, I may be a bit lazy
 set -euo pipefail
 
-VERSION='0.0.1'
+VERSION='0.1.0'
 
 help() {
   cat <<'EOF'
 Usage: copy-scripts.sh [Options]
 
-Copies top-level scripts from this directory to ~/bin.
+Copies top-level scripts and executables from dist/ to ~/bin.
 
 Options:
-  --check      Compare the installed script version with the version from this repository.
-  --help       Show this message.
-  --version    Show the script version.
+  -c, --check      Compare the installed script version with the version from this repository.
+  -h, --help       Show this message.
+  -v, --version    Show the script version.
 EOF
 }
 
@@ -25,43 +25,26 @@ echo_error() {
   echo -e "\e[31mError: $*\e[0m" >&2
 }
 
-ensure_path_entry() {
-  local shellrc=""
-  local shell_name=""
+ensure_profile_config() {
+  local profile="$HOME/.profile"
+  local path_line='export PATH="$HOME/bin:$PATH"'
+  local source_line='source "$HOME/bin/aliases.sh"'
+  local updated=0
 
-  if [[ -n "${SHELL:-}" ]]; then
-    shell_name="$(basename "$SHELL")"
+  touch "$profile"
+
+  if ! grep -Fqx "$path_line" "$profile"; then
+    printf '\n# Added by copy-scripts.sh\n%s\n' "$path_line" >> "$profile"
+    updated=1
   fi
 
-  case "$shell_name" in
-    zsh)
-      shellrc="$HOME/.zshrc"
-      ;;
-    bash)
-      shellrc="$HOME/.bashrc"
-      ;;
-    fish)
-      shellrc="$HOME/.config/fish/config.fish"
-      ;;
-    *)
-      if [[ -f "$HOME/.zshrc" ]]; then
-        shellrc="$HOME/.zshrc"
-      else
-        shellrc="$HOME/.bashrc"
-      fi
-      ;;
-  esac
+  if [[ -f "$HOME/bin/aliases.sh" ]] && ! grep -Fqx "$source_line" "$profile"; then
+    printf '\n# Added by copy-scripts.sh\n%s\n' "$source_line" >> "$profile"
+    updated=1
+  fi
 
-  mkdir -p "$(dirname "$shellrc")"
-  touch "$shellrc"
-
-  if [[ ":$PATH:" != *":$HOME/bin:"* ]]; then
-    cat >> "$shellrc" <<'EOF'
-
-# Added by copy-scripts.sh
-export PATH="$HOME/bin:$PATH"
-EOF
-echo "Please restart your shell or run: source ${shellrc}"
+  if [[ "$updated" -eq 1 ]]; then
+    echo "Please restart your shell or run: source ${profile}"
   fi
 }
 
@@ -77,6 +60,16 @@ is_candidate_script() {
   [[ "$name" != *.txt ]] || return 1
   [[ -x "$path" || "$name" == *.sh ]] || return 1
   return 0
+}
+
+is_candidate_file() {
+  local path="$1"
+
+  if [[ "$path" == "$script_dir/dist/"* ]]; then
+    [[ -f "$path" && -x "$path" ]]
+  else
+    is_candidate_script "$path"
+  fi
 }
 
 check_script_version() {
@@ -147,13 +140,19 @@ function main() {
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   target_dir="$HOME/bin"
   mkdir -p "$target_dir"
-  ensure_path_entry
 
-  mapfile -t scripts < <(find "$script_dir" -maxdepth 1 -type f | sort)
+  mapfile -d '' -t scripts < <(
+    {
+      find "$script_dir" -maxdepth 1 -type f -print0
+      if [[ -d "$script_dir/dist" ]]; then
+        find "$script_dir/dist" -type f -executable -print0
+      fi
+    } | sort -z
+  )
 
   status=0
   for path in "${scripts[@]}"; do
-    if ! is_candidate_script "$path"; then
+    if ! is_candidate_file "$path"; then
       continue
     fi
 
@@ -170,6 +169,11 @@ function main() {
     install -m 0755 "$path" "$dest"
     echo_ok "Installed $name -> $dest"
   done
+
+  if [[ "$check_mode" -eq 0 ]]; then
+    ensure_profile_config
+  fi
+
   exit "$status"
 }
 
